@@ -258,6 +258,95 @@
     .reason-card h4 { margin: 0 0 6px; font-size: 15px; }
     .reason-card p { margin: 0; font-size: 13.8px; color: var(--sub); line-height: 1.62; }
 
+    /* Layering diagram: IOStream vs D-Bus */
+    .layer-diagram {
+      margin: 20px 0 24px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--paper);
+    }
+    .layer-diagram-title {
+      margin: 0 0 12px;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--ink);
+    }
+    .stack-tier {
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #f8fbff;
+    }
+    .stack-tier.proto {
+      border-color: #9ec0f3;
+      background: var(--blue-soft);
+    }
+    .stack-tier.adapt {
+      border-color: #b7ded4;
+      background: #f3faf7;
+    }
+    .stack-tier-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+    .stack-tier-head strong { font-size: 14.5px; color: var(--ink); }
+    .stack-tier-head span {
+      font: 700 11.5px var(--mono);
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--sub);
+    }
+    .stack-tier p {
+      margin: 0;
+      font-size: 13.5px;
+      color: var(--sub);
+      line-height: 1.58;
+    }
+    .stack-arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 6px 0;
+      font: 600 12.5px var(--mono);
+      color: var(--blue-strong);
+    }
+    .transport-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .transport-chip {
+      padding: 8px 10px;
+      border: 1px solid #cce6df;
+      border-radius: 7px;
+      background: #fff;
+      font-size: 12.8px;
+      line-height: 1.45;
+    }
+    .transport-chip b { display: block; color: var(--teal); margin-bottom: 2px; }
+    .transport-chip span { color: var(--sub); }
+    .layer-diagram-foot {
+      margin: 12px 0 0;
+      font-size: 13.5px;
+      color: var(--sub);
+      line-height: 1.62;
+    }
+    @media (max-width: 820px) {
+      .transport-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 480px) {
+      .transport-grid { grid-template-columns: 1fr; }
+    }
+
     /* Code block */
     .codeblock {
       margin: 16px 0 20px;
@@ -543,6 +632,60 @@
             </article>
           </div>
 
+          <h3>把两层分工切干净：谁负责适配通道，谁负责全双工协议？</h3>
+          <p>严格来说，<strong>并不是 D-Bus 自己去封装了 ADB、USB 或本地 Socket</strong>，而是 <code>frida-core</code> 先把各种跨设备、跨进程的传输方式统一抽象成一条双向字节流（<code>GLib.IOStream</code>），再把全双工的 P2P D-Bus 协议架在上面：</p>
+
+          <figure class="layer-diagram" aria-label="Frida 传输适配层与 D-Bus 协议层分工图">
+            <figcaption class="layer-diagram-title">分层架构：下层各自适配为 IOStream，上层统一讲 D-Bus</figcaption>
+
+            <div class="stack-tier">
+              <div class="stack-tier-head">
+                <strong>业务接口层（只写一份 Vala 接口）</strong>
+                <span>HostSession / AgentSession</span>
+              </div>
+              <p>只管调用 <code>enumerate_applications()</code>、<code>attach(pid)</code>、<code>create_script()</code> 与接收日志回调，完全不知道底层是 USB 还是网络。</p>
+            </div>
+
+            <div class="stack-arrow">↕ Vala [DBus] 自动生成代理与分发代码</div>
+
+            <div class="stack-tier proto">
+              <div class="stack-tier-head">
+                <strong>协议层：P2P D-Bus（GLib / GDBus）</strong>
+                <span>全双工 RPC + 异步推送 + 二进制序列化</span>
+              </div>
+              <p>负责 AUTH 握手、方法调用打包解包与异步事件推送；它不直接认识 ADB 或 USB，只认下方传上来的一个统一抽象：<code>GLib.IOStream</code>。</p>
+            </div>
+
+            <div class="stack-arrow">↑ 各类底层通道统一封装为双向字节流（GLib.IOStream）</div>
+
+            <div class="stack-tier adapt">
+              <div class="stack-tier-head">
+                <strong>传输适配层（frida-core 按平台实现）</strong>
+                <span>跨设备 / 跨进程底层通道</span>
+              </div>
+              <div class="transport-grid">
+                <div class="transport-chip">
+                  <b>Android USB</b>
+                  <span><code>droidy</code> 走 ADB 通道连手机 <code>27042</code></span>
+                </div>
+                <div class="transport-chip">
+                  <b>远程网络（-H）</b>
+                  <span>直接建立 TCP <code>SocketConnection</code></span>
+                </div>
+                <div class="transport-chip">
+                  <b>iOS USB</b>
+                  <span>经 <code>usbmuxd</code> 建立 USB 转发流</span>
+                </div>
+                <div class="transport-chip">
+                  <b>本机跨进程</b>
+                  <span>Unix Socket / Pipe（或 Windows Named Pipe）</span>
+                </div>
+              </div>
+            </div>
+
+            <p class="layer-diagram-foot"><strong>三方精确分工：</strong><strong>D-Bus</strong> 是通信协议规范；<strong>GLib（<code>GDBus</code>）</strong>是静态编进 Frida 的现成协议实现库（负责握手、编解码与帧收发）；<strong><code>frida-core</code></strong> 自己干两头——往下把 ADB / TCP / Socket 等通道适配成 <code>IOStream</code>，往上定义并实现 <code>HostSession</code> / <code>AgentSession</code> 业务接口。底层换路，上层代码零改动。</p>
+          </figure>
+
           <figure class="codeblock">
             <div class="code-head">
               <span>示意：Vala 里声明一个 Frida D-Bus 接口有多简单（lib/base/session.vala）</span>
@@ -557,6 +700,53 @@
 
 <span class="c">// 3. 手机端注册到对象路径 /re/frida/HostSession，电脑端通过同一路径拿到远程 Proxy</span></pre>
           </figure>
+
+          <h3>给 Android 开发者的直觉类比：它很像“能跨机器的 AIDL / IBinder”</h3>
+          <p>写完接口后，最终的调用体验就是<strong>在本地调远端的方法，跟调本地方法几乎一样</strong>——如果熟悉 Android 的 Binder IPC，下面这张 1:1 对照表可以帮你瞬间建立直觉：</p>
+
+          <div class="table-wrap">
+            <table class="data" aria-label="Android AIDL/IBinder 与 Frida P2P D-Bus 对照表">
+              <thead>
+                <tr>
+                  <th scope="col">角色</th>
+                  <th scope="col">Android AIDL / IBinder</th>
+                  <th scope="col">Frida P2P D-Bus（Vala + GDBus）</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">接口契约</th>
+                  <td><code>.aidl</code> 接口文件</td>
+                  <td>Vala 的 <code>[DBus (name = "...")] interface</code></td>
+                </tr>
+                <tr>
+                  <th scope="row">客户端“假装调本地方法”</th>
+                  <td>自动生成的 <strong><code>Proxy</code></strong> 对象</td>
+                  <td>Vala / GDBus 自动生成的 <strong><code>DBusProxy</code></strong> 对象</td>
+                </tr>
+                <tr>
+                  <th scope="row">服务端收包分发</th>
+                  <td>自动生成的 <strong><code>Stub.onTransact()</code></strong></td>
+                  <td>服务端 <code>register_object("/re/frida/HostSession", ...)</code></td>
+                </tr>
+                <tr>
+                  <th scope="row">参数打包解包</th>
+                  <td><code>Parcel</code> 序列化</td>
+                  <td>D-Bus / <code>GVariant</code> 二进制序列化</td>
+                </tr>
+                <tr>
+                  <th scope="row">服务端回调客户端</th>
+                  <td>传入回调 <code>IBinder</code>（如 <code>ICallback</code>）</td>
+                  <td>注册 <code>AgentMessageSink</code> 接收 <code>console.log</code> 推送</td>
+                </tr>
+                <tr>
+                  <th scope="row">底层传输通道（核心差异）</th>
+                  <td><strong>Linux 内核 <code>/dev/binder</code> 驱动</strong>（仅限本机跨进程）</td>
+                  <td><strong>任意双向流 <code>IOStream</code></strong>（既能本机跨进程，也能跨机器、跨系统）</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
           <div class="callout amber">
             <p><strong>顺便解开一个实战踩坑：为什么电脑 <code>frida</code> 和手机 <code>frida-server</code> 版本不一致常会报错？</strong><br>
