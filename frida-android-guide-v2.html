@@ -1296,7 +1296,7 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server && /data/local/tmp/frida
                           <strong>1. Core 内部原生库（及官方 devkit 静态库）</strong>
                           <span class="tag-static">静态链接进 _frida.pyd 与 frida-server</span>
                         </div>
-                        双端复用的核心逻辑：在电脑端负责通过 ADB 找 Android 设备并建立 D-Bus 通信（<code>droidy-host-session.vala</code>）；在手机端负责接收指令、枚举应用与调度注入（<code>linux-host-session.vala</code>）。
+                        双端复用的核心逻辑：在电脑端负责通过 ADB 找 Android 设备并建立 <a href="frida-dbus-guide.html">D-Bus 通信</a>（<code>droidy-host-session.vala</code>）；在手机端负责接收指令、枚举应用与调度注入（<code>linux-host-session.vala</code>）。
                       </li>
                       <li class="artifact-item">
                         <div class="artifact-item-top">
@@ -1472,7 +1472,7 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server && /data/local/tmp/frida
                   <th scope="row"><code>frida</code> 包 + <code>_frida.pyd</code></th>
                   <td><code>frida-python</code><br>（静态链接 <code>frida-core</code>）</td>
                   <td>Python + C + Vala</td>
-                  <td>把 Python 调用转进电脑端 Core，经 ADB/D-Bus 和手机通信</td>
+                  <td>把 Python 调用转进电脑端 Core，经 ADB/<a href="frida-dbus-guide.html">D-Bus</a> 和手机通信</td>
                   <td>被 CLI <code>import frida</code> 加载到<strong>同一个电脑端 Python 进程</strong></td>
                 </tr>
                 <tr data-loc="server">
@@ -1533,7 +1533,7 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server && /data/local/tmp/frida
                 <ul class="pid-items">
                   <li><strong><code>frida-tools</code>（CLI）</strong><small>解析 <code>-U -N -l hook.js</code> 并打印终端输出</small></li>
                   <li><strong><code>frida-python</code> + <code>_frida.pyd</code></strong><small>Python 到 C 扩展的调用桥</small></li>
-                  <li><strong>电脑端 <code>frida-core</code></strong><small>静态链接在 <code>_frida.pyd</code> 内，经 ADB 建 D-Bus 连接</small></li>
+                  <li><strong>电脑端 <code>frida-core</code></strong><small>静态链接在 <code>_frida.pyd</code> 内，经 ADB 建 <a href="frida-dbus-guide.html">D-Bus 连接 ↗</a></small></li>
                 </ul>
               </div>
             </article>
@@ -1570,7 +1570,7 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server && /data/local/tmp/frida
           </div>
 
           <h3>4.2 交互步进演示：跟着 <code>hook.js</code> 走完一遍完整链路</h3>
-          <p>点击<strong>播放</strong>或直接点左侧任意一步，对照看看刚才认识的每个子项目产物，分别是在哪一步接棒、把 <code>onResume called</code> 送回终端的：</p>
+          <p>点击<strong>播放</strong>或直接点左侧任意一步，对照看看刚才认识的每个子项目产物，分别是在哪一步接棒、把 <code>onResume called</code> 送回终端的（对步骤 3 中的 <strong>D-Bus</strong> 不熟？可随时点开补充页：<a href="frida-dbus-guide.html">《Frida 里的 D-Bus 到底是什么？》↗</a>）：</p>
 
           <section class="board" aria-label="Frida Android 端到端流程交互演示">
             <div class="board-toolbar">
@@ -1669,8 +1669,9 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server && /data/local/tmp/frida
             </div>
 
             <div class="index-group">
-              <h3>同目录其他笔记</h3>
+              <h3>同目录补充专题与其他笔记</h3>
               <ul class="index-list">
+                <li><a href="frida-dbus-guide.html">补充专题：Frida 里的 D-Bus 到底是什么？（P2P 协议、HostSession/AgentSession 与 27042 AUTH 反检测）</a></li>
                 <li><a href="frida-android-guide.html">Frida Android 源码与工作原理导读（旧版全景稿）</a></li>
                 <li><a href="xposed-art-hook-principle.html">Xposed v89 源码解析：ART 方法 Hook 的完整流程</a></li>
                 <li><a href="xposed-art-animation.html">ART 方法调用与 Xposed Hook · 三段交互动画</a></li>
@@ -1812,6 +1813,7 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server && /data/local/tmp/frida
         text: '电脑端 Core 识别到这是 Android USB 设备，交由 droidy-host-session.vala 复用 ADB 打开传输通道，并在其上建立 Frida D-Bus 连接，向手机端发送枚举与附加请求。',
         code: '[frida-core 电脑端 ──ADB/D-Bus──▶ frida-server]\ndroidy-host-session.vala → 打开 ADB 通道 → 建立 D-Bus → attach(pid)',
         refs: [
+          ['补充阅读：什么是 D-Bus？', 'frida-dbus-guide.html'],
           ['打开 ADB 通道 L165', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/droidy/droidy-host-session.vala#L165'],
           ['建立 D-Bus L897', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/droidy/droidy-host-session.vala#L897']
         ],
@@ -2005,9 +2007,12 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server && /data/local/tmp/frida
       f.refs.forEach(([label, href]) => {
         const a = document.createElement('a');
         a.href = href;
-        a.textContent = `查看源码：${label}`;
-        a.target = '_blank';
-        a.rel = 'noopener';
+        const isExternal = /^https?:\/\//.test(href);
+        a.textContent = isExternal ? `查看源码：${label}` : `${label} ↗`;
+        if (isExternal) {
+          a.target = '_blank';
+          a.rel = 'noopener';
+        }
         refsEl.appendChild(a);
       });
 
