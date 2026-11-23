@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Xposed v89 源码解析：ART 方法 Hook 的完整流程｜Android Security Notes</title>
+  <style>
+    :root{--bg:#f5f4ef;--paper:#fff;--ink:#172434;--sub:#526171;--line:#d8dedf;--dark:#142332;--teal:#13746a;--orange:#c4542a;--soft:#eaf4f1;--code:#10202e}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.78 system-ui,"Microsoft YaHei","PingFang SC",sans-serif}a{color:var(--teal);text-underline-offset:3px}code,pre{font-family:"Cascadia Code",Consolas,monospace}code{overflow-wrap:anywhere}::selection{background:#bde5db}
+    .shell{display:grid;grid-template-columns:264px minmax(0,1fr);max-width:1420px;margin:auto;min-height:100vh}.sidebar{border-right:1px solid var(--line);background:#eeefe9}.side-inner{position:sticky;top:0;max-height:100vh;overflow:auto;padding:34px 18px 32px 28px}.brand{font:700 12px/1.4 Consolas,monospace;letter-spacing:.1em;color:var(--teal);margin:0 0 42px}.side-title{font-size:12px;color:#7b888f;letter-spacing:.08em;margin:0 0 10px}.toc{display:grid;gap:3px}.toc a{display:block;padding:8px 12px;border-left:3px solid transparent;text-decoration:none;color:#41515e;font-size:14px;line-height:1.45;border-radius:0 5px 5px 0}.toc a:hover,.toc a:focus-visible{background:#dfeae6;color:var(--ink)}.toc a.active{border-color:var(--teal);background:#dfeae6;color:#0e5049;font-weight:700}.side-foot{font-size:12px;line-height:1.65;color:#77838a;border-top:1px solid var(--line);margin-top:32px;padding-top:16px}
+    .main{min-width:0;padding:0 64px 100px}.hero{padding:64px 0 48px;border-bottom:1px solid var(--line)}.eyebrow{font:700 12px Consolas,monospace;color:var(--orange);letter-spacing:.12em;margin-bottom:18px}.hero h1{font-size:clamp(36px,4vw,58px);line-height:1.16;letter-spacing:-.035em;max-width:790px;margin:0 0 24px}.hero p{max-width:760px;font-size:19px;color:#475766;margin:0}.scope{display:inline-block;background:#e5edea;color:#17635c;padding:5px 10px;border-radius:3px;font:700 12px Consolas,monospace;margin-bottom:20px}.content{max-width:920px}.chapter{scroll-margin-top:26px;border-bottom:1px solid var(--line);padding:52px 0 58px}.chapter:last-child{border:0}.chapter-number{font:700 12px Consolas,monospace;letter-spacing:.1em;color:var(--orange);margin-bottom:8px}.chapter h2{font-size:30px;line-height:1.3;letter-spacing:-.02em;margin:0 0 20px}.chapter h3{font-size:19px;line-height:1.45;margin:30px 0 11px}.chapter p{max-width:790px;margin:0 0 16px}.lead{font-size:18px;color:#354b59}.muted{color:var(--sub);font-size:14px}.key{background:var(--soft);border-left:4px solid var(--teal);padding:17px 20px;margin:24px 0}.key p{margin:0}.key strong{color:#0f554d}.warning{background:#fff0e7;border-left-color:var(--orange)}.warning strong{color:#9a3f1b}
+    .overview{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:26px 0}.overview div{background:var(--paper);border:1px solid var(--line);padding:14px 12px;min-height:112px}.overview b{display:block;color:var(--orange);font:700 12px Consolas,monospace;margin-bottom:9px}.overview span{font-size:14px;line-height:1.45;display:block}.sequence{margin:24px 0;background:var(--paper);border:1px solid var(--line)}.sequence-head{background:var(--dark);color:#eaf3f4;padding:13px 18px;font-size:13px;font-weight:700}.sequence-rows{padding:8px 18px}.sequence-row{display:grid;grid-template-columns:38px 160px 24px minmax(0,1fr);gap:10px;align-items:start;padding:14px 0;border-bottom:1px solid #e8eceb}.sequence-row:last-child{border:0}.sequence-row .n{font:700 13px Consolas,monospace;color:var(--orange);padding-top:1px}.sequence-row .from{font-weight:700;font-size:14px}.sequence-row .arr{color:var(--orange);font-weight:700}.sequence-row .action{font-size:14px;line-height:1.55}.sequence-row .action small{display:block;color:var(--sub);font-size:12px;margin-top:2px}
+    .codeblock{background:var(--code);color:#e9f1f1;margin:24px 0;overflow:hidden;border:1px solid #203d4d}.code-label{font:12px Consolas,monospace;color:#a7c6cb;border-bottom:1px solid #2c4856;padding:10px 16px}.codeblock pre{margin:0;padding:18px 20px;overflow:auto;font-size:13px;line-height:1.7;tab-size:4}.comment{color:#9eb3bb}.model{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:24px 0}.model-card{background:var(--paper);border:1px solid var(--line);padding:20px}.model-card.after{border-color:#dca68c;background:#fffaf7}.model-card h4{margin:0 0 16px;font-size:15px}.model-card dl{margin:0;display:grid;gap:8px}.model-card dl div{display:grid;grid-template-columns:130px 1fr;gap:10px;border-top:1px solid #e5e9e8;padding-top:8px;font-size:13px}.model-card dt{font-family:Consolas,monospace;color:#586b78}.model-card dd{margin:0;font-weight:700}.arrow-note{color:var(--orange);font-weight:700;font-size:13px;margin:-4px 0 20px}.data{width:100%;border-collapse:collapse;background:var(--paper);font-size:14px;margin:24px 0}.data th,.data td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:11px 12px}.data th{background:#e8eeed;font-weight:700}.data tr:last-child td{border-bottom:0}.sources{padding-left:20px;font-size:14px}.sources li{padding:5px 0}.footer{border-top:1px solid var(--line);padding:28px 0;color:#75838b;font-size:12px}
+    @media(max-width:1050px){.shell{grid-template-columns:224px minmax(0,1fr)}.main{padding-inline:36px}.side-inner{padding-inline:18px}.overview{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:720px){.shell{display:block}.sidebar{border-right:0;border-bottom:1px solid var(--line)}.side-inner{position:static;max-height:none;padding:18px 20px}.brand{margin:0 0 10px}.side-title,.side-foot{display:none}.toc{display:flex;gap:5px;overflow:auto;scrollbar-width:thin}.toc a{white-space:nowrap;border-left:0;border-bottom:3px solid transparent;border-radius:4px 4px 0 0;padding:8px 10px}.toc a.active{border-bottom-color:var(--teal)}.main{padding:0 20px 60px}.hero{padding:38px 0 32px}.hero p{font-size:17px}.chapter{padding:38px 0 44px}.chapter h2{font-size:25px}.overview{grid-template-columns:1fr}.model{grid-template-columns:1fr}.sequence-row{grid-template-columns:28px 116px 16px minmax(0,1fr);gap:5px}.sequence-row .from,.sequence-row .action{font-size:12px}.data{display:block;overflow-x:auto}.codeblock{margin-inline:-20px}.codeblock pre{font-size:12px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  
+    .brand{margin-bottom:24px}
+    .hero{padding-block:48px 32px}
+    .hero h1{font-size:clamp(32px,5vw,52px);margin-bottom:12px}
+    .hero .scope{margin-bottom:12px}
+    .chapter{padding-block:36px 40px}
+    .chapter h3{margin-top:24px;scroll-margin-top:24px}
+    .chapter .codeblock{margin-block:16px}
+    .scroll{overflow:auto}
+    .scroll:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+    .table-wrap{margin-block:24px;border:1px solid var(--line);background:var(--paper)}
+    .table-wrap .data{display:table;margin:0;min-width:540px}
+    .data caption,.timing figcaption{padding:12px 16px;text-align:left;color:var(--ink);font-weight:700}
+    .timing{margin:20px 0;background:var(--paper);border:1px solid var(--line)}
+    .timing figcaption{border-bottom:1px solid var(--line)}
+    .timing p{margin:0;padding:12px 16px;font-size:14px;color:var(--sub);border-top:1px solid var(--line)}
+    .lifelines{min-width:680px;padding:12px 12px 0}
+    .lane-row{display:grid;grid-template-columns:repeat(var(--lanes),minmax(0,1fr));min-height:56px;text-align:center}
+    .lane-head{min-height:0}
+    .lane-head span{padding:8px 4px;background:#edf3f0;border-right:1px solid white;font-weight:700;font-size:14px}
+    .lane-row i{grid-row:1;background:linear-gradient(var(--line),var(--line)) center/1px 100% no-repeat}
+    .message{grid-row:1;position:relative;align-self:center;padding:0 8px 6px;font-size:13px;line-height:1.35}
+    .message::before{content:'';position:absolute;bottom:0;left:var(--edge);right:var(--edge);border-bottom:2px solid var(--teal)}
+    .message::after{content:'';position:absolute;bottom:-3px;border:4px solid transparent}
+    .forward::after{right:var(--edge);border-left-color:var(--teal);border-right:0}
+    .back::before{border-bottom-style:dashed}
+    .back::after{left:var(--edge);border-right-color:var(--teal);border-left:0}
+    .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+    @media(max-width:720px){.brand{margin-bottom:8px}.hero{padding-block:28px 24px}.chapter{padding-block:24px 28px}.chapter .codeblock{margin-inline:0}}
+    :root{color-scheme:light}
+    :root{--bg:#fff;--teal:#234d92;--soft:#eaf0fb}
+    .sidebar{background:#f1f4f9}
+    :is(.toc a.active,.toc a:hover,.scope){color:var(--teal);background:var(--soft)}
+    #sources{background:#f5f7fc;padding:20px;border:1px solid #d9e2f0;margin-top:20px;overflow-wrap:anywhere}
+    #sources h2{font-size:19px;margin-bottom:8px}
+    #sources li{padding-block:8px;border-bottom:1px solid #d9e2f0}
+    @media(min-width:1100px){
+      .shell{grid-template-columns:184px minmax(0,1fr)}
+      .side-inner{padding-inline:16px}
+      .main{padding-inline:28px}
+      .content{max-width:1080px;margin-inline:auto}
+    }
+
+    .chapter .source-excerpt{background:var(--paper);border:1px solid var(--line);border-radius:8px;color:var(--ink)}
+    .source-filebar,.source-metadata{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 16px;padding:8px 16px;overflow-wrap:anywhere}
+    .source-filebar{justify-content:space-between;background:#eaf0f6;border-bottom:1px solid var(--line)}
+    .source-filebar strong{min-width:0;font-size:14px}
+    .source-ranges{font-size:13px;font-weight:650}
+    .source-ranges a{display:inline-block;white-space:nowrap}
+    .source-metadata{background:#f8fafc;color:var(--sub);font-size:13px;line-height:1.5}
+    .source-excerpt pre{background:var(--code);color:#e9f1f1}
+    .source-excerpt pre:focus-visible{outline:2px solid #b0ecf0;outline-offset:-3px}
+    .source-summary{padding:12px 16px;border-top:1px solid var(--line);font-size:14px}
+    @media(max-width:720px){.source-filebar,.source-metadata,.source-summary{padding-inline:12px}}
+
+    ::selection{background:#cce0fb;color:#11243b}
+    .codeblock pre::selection,.codeblock pre *::selection{background:#a6ccff;color:#101f35;text-shadow:none}
+    .source-note{
+      display:grid;grid-template-columns:auto minmax(0,1fr);align-items:baseline;gap:8px;
+      margin:7px 0 4px;padding:5px 8px;border-inline-start:2px solid #648db8;border-radius:0 4px 4px 0;
+      background:#1b3047;color:#daebfa;font:13px/1.55 system-ui,"Microsoft YaHei",sans-serif;
+      white-space:normal;overflow-wrap:anywhere
+    }
+    .source-note-label{border-radius:4px;padding:0 5px;background:#2c4865;color:#e2efff;font-size:11px;font-weight:700;white-space:nowrap}
+
+    .source-context{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 12px;padding:7px 16px 9px;background:#f8fafc;color:var(--ink);font-size:13px;overflow-wrap:anywhere}
+    .source-context strong{color:var(--sub);font-size:12px}
+    @media(max-width:720px){.source-context{padding-inline:12px}}
+
+    #entry-implementation{scroll-margin-top:24px}
+    .setter-detail{margin:12px 0;border:1px solid var(--line);border-radius:8px;background:var(--paper)}
+    .setter-detail summary{padding:12px 16px;cursor:pointer;font-weight:700}
+    .setter-detail[open] summary{border-bottom:1px solid var(--line)}
+    .setter-body{padding:16px;min-width:0}
+    .setter-body p{margin-bottom:12px}
+    .setter-body .source-excerpt:last-child{margin-bottom:0}
+    @media(max-width:720px){.setter-body{padding:12px}}
+    .pointer-map{margin:16px 0 20px;padding:16px;border:1px solid var(--line);border-radius:8px;background:#f8fafc;scroll-margin-top:24px}
+    .pointer-map figcaption{font-weight:700;margin-bottom:12px}
+    .pointer-map-grid{display:grid;grid-template-columns:minmax(0,1fr) 92px minmax(0,1fr);align-items:center;gap:8px}
+    .pointer-object{margin:0;overflow:hidden;border:1px solid var(--line);border-radius:6px;background:var(--paper)}
+    .pointer-object dt{padding:8px 12px;background:#e7eef6;font-weight:700}
+    .pointer-object dd{margin:0;padding:8px 12px;border-top:1px solid var(--line);font-size:14px}
+    .pointer-object .pointer-field{background:var(--soft);color:#184e41}
+    .pointer-object small{display:block;color:var(--sub)}
+    .pointer-arrow{text-align:center;color:var(--teal);font-weight:700;font-size:13px}
+    .pointer-arrow span{display:block;font-size:30px;line-height:1}
+    .pointer-arrow .down{display:none}
+    .pointer-map .pointer-caption{margin:12px 0 0;color:var(--sub);font-size:14px}
+    @media(max-width:720px){
+      .pointer-map-grid{grid-template-columns:minmax(0,1fr)}
+      .pointer-arrow .across{display:none}
+      .pointer-arrow .down{display:block}
+    }
+    .animation-card{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#eef3f7}
+    .animation-card iframe{display:block;border:0;width:100%;height:840px}
+    .animation-link{display:inline-block;margin-block:0 12px;padding:4px 10px;border:1px solid #cad9eb;border-radius:5px;background:var(--soft);font-size:14px;font-weight:650;text-decoration:none}
+    .animation-link:hover,.animation-link:focus-visible{border-color:var(--teal);text-decoration:underline}
+    @media(max-width:720px){.animation-card iframe{height:1110px}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" aria-label="文章目录"><div class="side-inner">
+    <div class="brand">ANDROID SECURITY / FIELD NOTES</div>
+    <div class="side-title">本页目录</div>
+    <nav class="toc" aria-label="文章目录">
+<a href="#install">安装</a>
+<a href="#scope">环境</a>
+<a href="#flow-animations">流程动画</a>
+<a href="#startup">准备</a>
+<a href="#register">注册</a>
+<a href="#dispatch">执行</a>
+<a href="#timelines">对照表</a>
+<a href="#sources">源码索引</a>
+</nav>
+    <div class="side-foot">聚焦 rovo89 经典 Xposed 的 ART 方法 Hook。<br>逐行源码锚点：<code>v89-sdk25</code>。</div>
+  </div></aside>
+  <main class="main"><div class="content">
+    <header class="hero"><div class="scope">Android 7.1.2 / API 25 · rovo89 Xposed v89</div><h1>Xposed v89 源码解析：ART 方法 Hook 的完整流程</h1><p>沿着启动、注册和执行这条线读源码。先看 Zygote 怎样初始化 Xposed，再看 Java 回调怎样经 JNI 关联到目标 <code>ArtMethod</code>，最后追踪一次调用如何执行回调并返回。</p>
+    </header>
+
+    <section id="install" class="chapter">
+<h2>安装 · 框架文件如何落地</h2>
+<p class="lead">安装 Xposed 框架 ZIP 时，包里的 <code>flash-script.sh</code> 会把框架文件写入 <code>/system</code>。接下来系统启动 Zygote 时，就会运行 Xposed 修改过的 <code>app_process</code>。</p>
+<ul>
+  <li><code>app_process</code> 是 Zygote 的启动程序。脚本保留原文件，并用软链接把启动路径指向 Xposed 修改后的程序。</li>
+  <li><code>libart.so</code> 是 Android 的 ART 运行时。脚本装入 Xposed 修改过的版本，后面负责改写方法入口的代码就在这个版本里。</li>
+  <li><code>libxposed_art.so</code> 是 JNI 桥接库，负责把 Java 层的 Hook 注册请求交给 ART。<code>XposedBridge.jar</code> 提供 Java API，并保存和分发模块回调。</li>
+</ul>
+<p>下面是脚本里对应的几行。Zygote 启动后什么时候加载桥接库，见 <a href="#startup">「准备」</a>。</p>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>flash-script.sh</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/XposedTools/blob/78173acfbf7fe2ef46e4ee4d0dcbad15bb45b05f/zipstatic/_all/META-INF/com/google/android/flash-script.sh#L170-L173">170–173 行</a> · <a href="https://github.com/rovo89/XposedTools/blob/78173acfbf7fe2ef46e4ee4d0dcbad15bb45b05f/zipstatic/_all/META-INF/com/google/android/flash-script.sh#L177">177 行</a> · <a href="https://github.com/rovo89/XposedTools/blob/78173acfbf7fe2ef46e4ee4d0dcbad15bb45b05f/zipstatic/_all/META-INF/com/google/android/flash-script.sh#L181-L184">181–184 行</a> · <a href="https://github.com/rovo89/XposedTools/blob/78173acfbf7fe2ef46e4ee4d0dcbad15bb45b05f/zipstatic/_all/META-INF/com/google/android/flash-script.sh#L188">188 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/XposedTools · 78173acf</span><code>zipstatic/_all/META-INF/com/google/android/flash-script.sh</code></div>
+  <div class="source-context"><strong>脚本位置</strong><code>flash-script.sh 顶层安装流程</code></div>
+  <pre tabindex="0" aria-label="安装脚本写入框架文件"><code><span class="source-note"><span class="source-note-label">注释</span><span>写入框架版本等属性，供启动代码读取。</span></span> 170 │ install_nobackup /system/xposed.prop                      0    0 0644
+<span class="source-note"><span class="source-note-label">注释</span><span>安装包含 XposedBridge 的 Java 桥接 JAR。</span></span> 171 │ install_nobackup /system/framework/XposedBridge.jar       0    0 0644
+ 172 │ 
+<span class="source-note"><span class="source-note-label">注释</span><span>备份原 app_process32，再把原路径链接到 Xposed 启动程序。</span></span> 173 │ install_and_link  /system/bin/app_process32               0 2000 0755 u:object_r:zygote_exec:s0
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>装入修改过的 32 位 ART 运行时。</span></span> 177 │ install_overwrite /system/lib/libart.so                   0    0 0644
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>安装 32 位 JNI 桥接库，供启动后加载。</span></span> 181 │ install_nobackup  /system/lib/libxposed_art.so            0    0 0644
+<span class="source-note"><span class="source-note-label">注释</span><span>64 位系统还要安装对应位数的启动程序和库。</span></span> 182 │ if [ $IS64BIT ]; then
+ 183 │   install_and_link  /system/bin/app_process64             0 2000 0755 u:object_r:zygote_exec:s0
+ 184 │   install_overwrite /system/lib64/libart.so               0    0 0644
+     …
+ 188 │   install_nobackup  /system/lib64/libxposed_art.so        0    0 0644</code></pre>
+  <figcaption class="source-summary">安装脚本写入框架文件</figcaption>
+</figure>
+</section>
+
+<section id="scope" class="chapter">
+<h2>环境 · Android 与 Xposed 版本</h2>
+
+<p><strong>对照基准</strong>　本文所有原生 AOSP 片段固定在 <code>android-7.1.2_r39</code>，用于对照同一 Android 小版本。Xposed 实现固定在 <code>Xposed@v89</code>、<code>XposedBridge@v89</code> 和 <code>android_art@v89-sdk25</code>。安装脚本单独标明 XposedTools 的提交。AOSP 标签用于源码对照，发布包的具体上游修订未在本文确认。</p>
+
+<p>源码分布在三个仓库。启动和 JNI 桥用 <code>rovo89/Xposed</code> 的 <code>v89</code> 标签，模块 API 和 Java 回调用 <code>rovo89/XposedBridge</code> 的 <code>v89</code> 标签，运行时改动用 <code>rovo89/android_art</code> 的 <code>v89-sdk25</code> 标签。<a href="#sources">[查看源码索引]</a></p>
+<p class="lead">下文逐行讲解的源码样本是 <strong>rovo89 经典 Xposed v89 + Android 7.1.2（API 25）</strong>。ART 源码固定到 <code>rovo89/android_art</code> 的 <code>v89-sdk25</code> 标签；该标签目前与 <code>xposed-nougat-mr2</code> 分支头指向同一提交 <code>b23f496</code>。<a href="#ref-versions">[版本标签与 Android 对照]</a></p>
+<p>Android 7.0 使用 API 24，Android 7.1.x 使用 API 25。两个 API 级别都有 v88、v88.1、v88.2 和 v89 的对应 ART 源码标签。<a href="#versions">查看版本对照表</a>。</p>
+<p class="muted">这里的 <code>v89</code> 是 Xposed <strong>Framework</strong> 版本，<code>sdk25</code> 是 Android 平台 API 级别；它们都不是 Xposed Installer 应用版本，也不能用模块开发用的 <code>api-XX.jar</code> 版本替代。Android 5.x/6.0 有相应经典 Xposed 标签，但 ART 结构和代码细节另论；Android 8.x 的 v90 beta、Frida、LSPosed 均不在本文的逐行实现范围。<a href="#ref-api-version">[Xposed API 版本说明]</a></p>
+</section>
+
+<section id="flow-animations" class="chapter">
+<h2>流程动画 · 正常执行、安装 Hook、注册后执行</h2>
+<p>先看正常 Java 调用怎样进入 ART，再看 Hook 改了哪些字段，最后跟着一次调用走过代理、回调和返回。顶部标签可来回切换，切换时会暂停播放并保留进度。<a href="xposed-art-animation.html" target="_blank" rel="noopener">[在新窗口打开动画]</a></p>
+<div class="animation-card">
+  <iframe id="flow-animation-frame" src="xposed-art-animation.html#normal" title="ART 方法调用与 Xposed Hook 三段动画" loading="lazy"></iframe>
+</div>
+</section>
+
+<section id="startup" class="chapter">
+<h2>准备 · Zygote 初始化桥接层</h2>
+<p>经典 Xposed 的文件安装完成后，系统启动修改过的 <code>app_process</code>。ART 虚拟机创建时，<code>AppRuntime::onVmCreated</code> 进入 <code>xposed::onVmCreated</code>。后者检测当前运行时为 ART，<code>dlopen</code> 加载 <code>libxposed_art.so</code>，用 <code>dlsym</code> 取得 <code>xposedInitLib</code>，再注册 XposedBridge 的 JNI 方法和 Java 分发入口。这个阶段还没有 Hook 某个应用的 <code>Gate.check</code>。<a href="#ref-startup">[启动源码]</a></p>
+<p>应用进程由 Zygote 派生时继承已加载的库映射。进入包加载回调后，模块使用该包的类加载器定位示例方法。</p>
+<figure class="timing"><figcaption>时序图一 · 启动与准备</figcaption><div class="scroll" role="region" tabindex="0" aria-label="时序图一 · 启动与准备"><div class="lifelines" role="group" style="--lanes:4"><div class="lane-row lane-head" aria-hidden="true"><span>app_process / Zygote</span><span>Xposed 启动代码</span><span>Xposed native 桥</span><span>应用进程</span></div><div role="table" aria-label="按时间顺序排列的消息"><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><div role="cell" class="message forward" style="grid-column:1/3;--edge:25.00000%"><span class="sr-only">app_process / Zygote → Xposed 启动代码，</span>ART 创建后进入 onVmCreated</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><div role="cell" class="message forward" style="grid-column:2/4;--edge:25.00000%"><span class="sr-only">Xposed 启动代码 → Xposed native 桥，</span>加载 libxposed_art.so，调用 xposedInitLib</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><div role="cell" class="message back" style="grid-column:2/4;--edge:25.00000%"><span class="sr-only">Xposed native 桥 → Xposed 启动代码，</span>提供初始化回调，后续绑定 JNI</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><div role="cell" class="message forward" style="grid-column:1/5;--edge:12.50000%"><span class="sr-only">app_process / Zygote → 应用进程，</span>Zygote 派生应用进程，子进程继承库映射</div></div></div></div></div><p>时间从上到下。应用进程随后进入包加载阶段。</p></figure>
+<h3>先看 AOSP 在哪里交出初始化时机</h3>
+<p><code>AndroidRuntime::start</code> 创建虚拟机后调用 <code>onVmCreated</code>。原生 <code>app_process</code> 的实现遇到 Zygote 会直接返回。这个回调时机由 Android 提供。</p>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>AndroidRuntime.cpp</code></strong><span class="source-ranges"><a href="https://android.googlesource.com/platform/frameworks/base/+/refs/tags/android-7.1.2_r39/core/jni/AndroidRuntime.cpp#1011">1011–1014 行</a></span></div>
+  <div class="source-metadata"><span>AOSP frameworks/base · android-7.1.2_r39</span><code>core/jni/AndroidRuntime.cpp</code></div>
+  <div class="source-context"><strong>所在方法</strong><code>android::AndroidRuntime::start()</code></div>
+  <pre tabindex="0" aria-label="AOSP 创建虚拟机后调用 onVmCreated"><code><span class="source-note"><span class="source-note-label">注释</span><span>创建虚拟机。返回非零表示失败，直接退出启动函数。</span></span>1011 │     if (startVm(&amp;mJavaVM, &amp;env, zygote) != 0) {
+1012 │         return;
+1013 │     }
+<span class="source-note"><span class="source-note-label">注释</span><span>创建成功后调用虚函数，进入 AppRuntime 对应的实现。</span></span>1014 │     onVmCreated(env);</code></pre>
+  <figcaption class="source-summary">AOSP 创建虚拟机后调用 onVmCreated</figcaption>
+</figure>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>app_main.cpp</code></strong><span class="source-ranges"><a href="https://android.googlesource.com/platform/frameworks/base/+/refs/tags/android-7.1.2_r39/cmds/app_process/app_main.cpp#50">50–54 行</a></span></div>
+  <div class="source-metadata"><span>AOSP frameworks/base · android-7.1.2_r39</span><code>cmds/app_process/app_main.cpp</code></div>
+  <div class="source-context"><strong>所在方法</strong><code>AppRuntime::onVmCreated()</code></div>
+  <pre tabindex="0" aria-label="AOSP 的 Zygote 分支"><code>  50 │     virtual void onVmCreated(JNIEnv* env)
+  51 │     {
+<span class="source-note"><span class="source-note-label">注释</span><span>原生 Zygote 启动时没有指定 Java 入口类，直接返回。</span></span>  52 │         if (mClassName.isEmpty()) {
+  53 │             return; // Zygote. Nothing to do here.
+  54 │         }</code></pre>
+  <figcaption class="source-summary">AOSP 的 Zygote 分支</figcaption>
+</figure>
+<h3>再看 Xposed 怎样接入</h3>
+<p>Xposed 修改了 <code>AppRuntime::onVmCreated</code>，从这里进入自己的启动代码。加载阶段先打开库，再取初始化函数，成功后执行库提供的回调。</p>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>app_main.cpp</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/Xposed/blob/v89/app_main.cpp#L83-L87">83–87 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/Xposed · v89</span><code>app_main.cpp</code></div>
+  <div class="source-context"><strong>所在方法</strong><code>AppRuntime::onVmCreated()</code></div>
+  <pre tabindex="0" aria-label="Xposed 启动程序接入 onVmCreated"><code>  83 │     virtual void onVmCreated(JNIEnv* env)
+  84 │     {
+<span class="source-note"><span class="source-note-label">注释</span><span>只有 Xposed 启动准备成功，才进入框架自己的回调。</span></span>  85 │         if (isXposedLoaded)
+  86 │             xposed::onVmCreated(env);
+  87 │ </code></pre>
+  <figcaption class="source-summary">Xposed 启动程序接入 onVmCreated</figcaption>
+</figure>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>xposed.cpp</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/Xposed/blob/v89/xposed.cpp#L395">395 行</a> · <a href="https://github.com/rovo89/Xposed/blob/v89/xposed.cpp#L405-L406">405–406 行</a> · <a href="https://github.com/rovo89/Xposed/blob/v89/xposed.cpp#L418-L419">418–419 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/Xposed · v89</span><code>xposed.cpp</code></div>
+  <div class="source-context"><strong>所在函数</strong><code>xposed::onVmCreated()</code></div>
+  <pre tabindex="0" aria-label="加载 ART 桥接库并调用初始化回调"><code><span class="source-note"><span class="source-note-label">注释</span><span>加载桥接库，并要求加载时解析所需的符号。</span></span> 395 │     void* xposedLibHandle = dlopen(xposedLibPath, RTLD_NOW);
+     …
+ 405 │     bool (*xposedInitLib)(XposedShared* shared) = NULL;
+<span class="source-note"><span class="source-note-label">注释</span><span>从库中查找导出的初始化函数地址。</span></span> 406 │     *(void **) (&amp;xposedInitLib) = dlsym(xposedLibHandle, &quot;xposedInitLib&quot;);
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>初始化函数设置共享结构中的回调，成功后再调用它。</span></span> 418 │     if (xposedInitLib(xposed)) {
+ 419 │         xposed-&gt;onVmCreated(env);</code></pre>
+  <figcaption class="source-summary">加载 ART 桥接库并调用初始化回调</figcaption>
+</figure>
+</section>
+
+<section id="register" class="chapter">
+<h2>注册 · 从 Java 回调到 ART 入口</h2>
+<figure class="timing"><figcaption>时序图二 · 首次注册一个方法</figcaption><div class="scroll" role="region" tabindex="0" aria-label="时序图二 · 首次注册一个方法"><div class="lifelines" role="group" style="--lanes:4"><div class="lane-row lane-head" aria-hidden="true"><span>模块 · Java</span><span>XposedBridge · Java</span><span>Xposed native · C++</span><span>ART fork · C++</span></div><div role="table" aria-label="按时间顺序排列的消息"><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><div role="cell" class="message forward" style="grid-column:1/3;--edge:25.00000%"><span class="sr-only">模块 · Java → XposedBridge · Java，</span>定位目标方法，登记 XC_MethodHook</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><div role="cell" class="message forward" style="grid-column:2/4;--edge:25.00000%"><span class="sr-only">XposedBridge · Java → Xposed native · C++，</span>经 JNI 进入 hookMethodNative</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><div role="cell" class="message forward" style="grid-column:3/5;--edge:25.00000%"><span class="sr-only">Xposed native · C++ → ART fork · C++，</span>解析 ArtMethod，进入 EnableXposedHook</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><div role="cell" class="message back" style="grid-column:1/5;--edge:12.50000%"><span class="sr-only">ART fork · C++ → 模块 · Java，</span>备份方法并改写入口后逐层返回</div></div></div></div></div><p>同一个方法后续新增回调时，可以复用已经安装的入口。</p></figure>
+<p>从 <code>XposedBridge.java</code> 读回调登记，再切到 <code>libxposed_art.cpp</code> 跟进 JNI，最后在 <code>art_method.cc</code> 看目标方法的入口如何被改写。<a href="#ref-bridge">[Java 桥]</a> <a href="#ref-native">[JNI 桥]</a> <a href="#ref-art">[ART 实现]</a></p>
+<h3 id="callback">模块交出回调</h3>
+<p>目标包加载时，模块的 <code>handleLoadPackage</code> 创建 <code>XC_MethodHook</code> 对象，调用 <code>findAndHookMethod</code>。这个 API 先解析目标类与方法，再把 <code>Method</code> 和回调交给 <code>XposedBridge.hookMethod</code>。桥接层保存回调集合，并在首次 Hook 该方法时调用 native 安装逻辑。此时 <code>beforeHookedMethod</code> 只是对象里的方法定义，尚未执行。<a href="#ref-api">[API 与桥接源码]</a></p>
+<div class="codeblock"><div class="code-label">模块 Java 示例 · IXposedHookLoadPackage 实现类的 handleLoadPackage()</div><pre><code>public void handleLoadPackage(LoadPackageParam lp) throws Throwable {
+    // 只在示例应用的包加载时注册。
+    if (!"com.example.target".equals(lp.packageName)) return;
+
+    // 用该应用的类加载器定位 Gate，并用参数类型选定方法。
+    XposedHelpers.findAndHookMethod(
+        "com.example.target.Gate", lp.classLoader,
+        "check", String.class,
+        new XC_MethodHook() {
+            protected void beforeHookedMethod(MethodHookParam p) {
+                // 命中 Hook 后才执行。这里设置返回值并跳过原方法。
+                if ("block".equals(p.args[0])) p.setResult(false);
+            }
+        });
+}</code></pre></div>
+<p class="muted">假设 <code>Gate.check(String)</code> 返回 <code>boolean</code>。上面的代码只用于说明 API 调用；目标类名和类加载器需与示例应用一致。</p>
+<h3 id="hook-native">首次注册进入 native 安装</h3>
+<p>第一段在 Java 类 <code>XposedBridge</code> 的 <code>hookMethod()</code> 里，它调用同一个类声明的 native 方法 <code>hookMethodNative()</code>。第二段是该 native 方法在 C++ 的实现，函数名为 <code>xposed::XposedBridge_hookMethodNative()</code>。Xposed 在初始化时通过 JNI 注册表把这两个符号绑定起来。<a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L427">[Java native 声明]</a> <a href="https://github.com/rovo89/Xposed/blob/v89/libxposed_common.cpp#L340-L360">[JNI 注册表]</a></p>
+
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>XposedBridge.java</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L240-L245">240–245 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/XposedBridge · v89</span><code>app/src/main/java/de/robv/android/xposed/XposedBridge.java</code></div>
+  <div class="source-context"><strong>所在方法</strong><code>XposedBridge.hookMethod(Member, XC_MethodHook)</code></div>
+  <pre tabindex="0" aria-label="Java 桥首次为方法登记 native Hook"><code> 240 │                 returnType = null;
+ 241 │             }
+ 242 │ 
+<span class="source-note"><span class="source-note-label">注释</span><span>把回调集合、参数类型和返回类型交给同一份附加信息。</span></span> 243 │             AdditionalHookInfo additionalInfo = new AdditionalHookInfo(callbacks, parameterTypes, returnType);
+<span class="source-note"><span class="source-note-label">注释</span><span>首次注册时跨 JNI，为这个方法建立 native Hook。</span></span> 244 │             hookMethodNative(hookMethod, declaringClass, slot, additionalInfo);
+ 245 │         }</code></pre>
+  <figcaption class="source-summary">Java 桥首次为方法登记 native Hook</figcaption>
+</figure>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>libxposed_art.cpp</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/Xposed/blob/v89/libxposed_art.cpp#L91-L95">91–95 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/Xposed · v89</span><code>libxposed_art.cpp</code></div>
+  <div class="source-context"><strong>所在函数</strong><code>xposed::XposedBridge_hookMethodNative()</code></div>
+  <pre tabindex="0" aria-label="JNI 使用 ART 的反射方法转换，再进入 Xposed 扩展"><code>  91 │     // Get the ArtMethod of the method to be hooked.
+<span class="source-note"><span class="source-note-label">注释</span><span>把 Java 的反射方法对象转换为 ART 内部的方法对象。</span></span>  92 │     ArtMethod* artMethod = ArtMethod::FromReflectedMethod(soa, javaReflectedMethod);
+  93 │ 
+  94 │     // Hook the method
+<span class="source-note"><span class="source-note-label">注释</span><span>在目标 ArtMethod 上调用 Xposed fork 增加的安装函数。</span></span>  95 │     artMethod-&gt;EnableXposedHook(soa, javaAdditionalInfo);</code></pre>
+  <figcaption class="source-summary">JNI 使用 ART 的反射方法转换，再进入 Xposed 扩展</figcaption>
+</figure>
+<p><code>XposedBridge.hookMethod</code> 经 JNI 调用 <code>hookMethodNative</code>。Xposed 的 <code>libxposed_art.cpp</code> 用 <code>ArtMethod::FromReflectedMethod</code> 把 Java 反射 <code>Method</code> 转成目标 <code>ArtMethod*</code>，再调用 Xposed 加入 ART fork 的 <code>EnableXposedHook</code>。<a href="#ref-native">[native 源码]</a><a href="#ref-art">[ART fork]</a></p>
+<p><code>FromReflectedMethod</code> 属于 ART。<code>EnableXposedHook</code> 是经典 Xposed 加入 ART fork 的逻辑。</p>
+<h3 id="backup">“复制原方法”究竟复制了什么？</h3>
+<a class="animation-link" href="xposed-art-animation.html#install" data-flow-animation="install">看动画 · 安装 Hook</a>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>art_method.cc</code></strong><span class="source-ranges"><a href="https://android.googlesource.com/platform/art/+/refs/tags/android-7.1.2_r39/runtime/art_method.cc#50">50–54 行</a> · <a href="https://android.googlesource.com/platform/art/+/refs/tags/android-7.1.2_r39/runtime/art_method.cc#477">477–479 行</a></span></div>
+  <div class="source-metadata"><span>AOSP art · android-7.1.2_r39</span><code>runtime/art_method.cc</code></div>
+  <div class="source-context"><strong>所在方法</strong><code>art::ArtMethod::FromReflectedMethod()</code> · <code>art::ArtMethod::CopyFrom()</code></div>
+  <pre tabindex="0" aria-label="原生 ART 已提供反射方法转换和方法复制"><code>  50 │ ArtMethod* ArtMethod::FromReflectedMethod(const ScopedObjectAccessAlreadyRunnable&amp; soa,
+  51 │                                           jobject jlr_method) {
+<span class="source-note"><span class="source-note-label">注释</span><span>解码 JNI 引用，取得 ART 管理的反射对象。</span></span>  52 │   auto* abstract_method = soa.Decode&lt;mirror::AbstractMethod*&gt;(jlr_method);
+  53 │   DCHECK(abstract_method != nullptr);
+<span class="source-note"><span class="source-note-label">注释</span><span>取出该反射对象关联的 ArtMethod 指针。</span></span>  54 │   return abstract_method-&gt;GetArtMethod();
+     …
+ 477 │ void ArtMethod::CopyFrom(ArtMethod* src, size_t image_pointer_size) {
+<span class="source-note"><span class="source-note-label">注释</span><span>按方法结构的大小复制元数据。指针字段只复制指针值。</span></span> 478 │   memcpy(reinterpret_cast&lt;void*&gt;(this), reinterpret_cast&lt;const void*&gt;(src),
+ 479 │          Size(image_pointer_size));</code></pre>
+  <figcaption class="source-summary">原生 ART 已提供反射方法转换和方法复制</figcaption>
+</figure>
+<p><code>EnableXposedHook</code> 先用 <code>CreateRuntimeMethod</code> 分配新的 <code>ArtMethod</code>，再用 <code>CopyFrom</code> 复制目标 <code>ArtMethod</code> 的结构字节。复制的是方法元数据与入口指针，<strong>不是复制 DEX 字节码或整块机器码</strong>。备份对象被标记为 <code>kAccXposedOriginalMethod</code>。<a href="#ref-copy">[CopyFrom 源码]</a></p>
+<p class="muted">如果启用了 JIT，且刚复制的 quick 入口位于 JIT 代码缓存，<code>CopyFrom()</code> 会把备份的 quick 入口改成解释器桥。之后还会单独清除非 native 方法的 profiling 指针，并把备份的热度计数清零。<a href="#ref-copy">[源码]</a></p>
+<p>框架还创建指向备份对象的反射 <code>Method</code>，并将它、模块回调信息和备份 <code>ArtMethod*</code> 放进 <code>XposedHookInfo</code>。这份信息在后续分发和调用原方法时使用。<a href="#ref-art">[ART fork]</a></p>
+<h3 id="entry">为什么要改 quick entry point？</h3>
+<p>仅把回调存进 Java 集合，应用执行 <code>Gate.check()</code> 时不会自动进入 Xposed。这个 ART 版本的 <code>ArtMethod</code> 包含 <code>entry_point_from_quick_compiled_code_</code>，quick 调用可通过它转到编译代码或运行时桥接 stub。经典 Xposed 把目标方法的这个入口改成 <code>GetQuickProxyInvokeHandler()</code> 返回的代理 stub 地址，才建立“目标调用 → 框架”的跳转。<a href="#ref-layout">[字段定义]</a><a href="#ref-art">[改写源码]</a></p>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>art_method.cc</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.cc#L566-L568">566–568 行</a> · <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.cc#L583">583 行</a> · <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.cc#L599-L605">599–605 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/art_method.cc</code></div>
+  <div class="source-context"><strong>所在方法</strong><code>art::ArtMethod::EnableXposedHook()</code></div>
+  <pre tabindex="0" aria-label="复用 CopyFrom 创建备份，随后改写目标入口"><code><span class="source-note"><span class="source-note-label">注释</span><span>分配独立的备份对象，接着把目标方法的元数据复制过去。</span></span> 566 │   ArtMethod* backup_method = cl-&gt;CreateRuntimeMethod(linear_alloc);
+ 567 │   backup_method-&gt;CopyFrom(this, cl-&gt;GetImagePointerSize());
+<span class="source-note"><span class="source-note-label">注释</span><span>给备份对象加上原方法标记。</span></span> 568 │   backup_method-&gt;SetAccessFlags(backup_method-&gt;GetAccessFlags() | kAccXposedOriginalMethod);
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>保存备份指针，后续调用原方法时使用。</span></span> 583 │   hook_info-&gt;original_method = backup_method;
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>把 XposedHookInfo 的地址写入目标方法的 JNI 槽，供分发时读取。</span></span> 599 │   SetEntryPointFromJniPtrSize(reinterpret_cast&lt;uint8_t*&gt;(hook_info), sizeof(void*));
+<span class="source-note"><span class="source-note-label">注释</span><span>把代理 stub 的地址写入目标方法的 quick 入口。下次命中该入口就会跳到代理。</span></span> 600 │   SetEntryPointFromQuickCompiledCode(GetQuickProxyInvokeHandler());
+<span class="source-note"><span class="source-note-label">注释</span><span>把目标方法的 DEX code item 偏移设为 0，保留在备份对象上的原偏移不受影响。</span></span> 601 │   SetCodeItemOffset(0);
+ 602 │ 
+ 603 │   // Adjust access flags.
+ 604 │   const uint32_t kRemoveFlags = kAccNative | kAccSynchronized | kAccAbstract | kAccDefault | kAccDefaultConflict;
+<span class="source-note"><span class="source-note-label">注释</span><span>清除列出的访问标志，并标记这个目标方法已被 Hook。</span></span> 605 │   SetAccessFlags((GetAccessFlags() &amp; ~kRemoveFlags) | kAccXposedHookedMethod);</code></pre>
+  <figcaption class="source-summary">复用 CopyFrom 创建备份，随后改写目标入口</figcaption>
+</figure>
+<h4>三行代码改的是同一个目标 ArtMethod 的三个位置</h4>
+<ol>
+  <li><strong>599 行存数据地址。</strong> <code>entry_point_from_jni_</code> 槽里写入的是 <code>XposedHookInfo*</code>。执行进入代理后，<code>GetXposedHookInfo()</code> 从这个槽读回指针，分发函数再用其中的备份反射对象和回调信息组装 Java 参数。<a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.h#L748-L755">[读回指针]</a> <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/entrypoint_utils.cc#L269-L282">[组装分发参数]</a></li>
+  <li><strong>600 行改调用去向。</strong> <code>entry_point_from_quick_compiled_code_</code> 存入代理 stub 的代码地址。后面在 ARM64 的 quick 调用路径上，<code>ldr</code> 从这个槽把新地址读进 <code>x9</code>，<code>blr x9</code> 就跳进代理 stub。<a href="#dispatch">[查看调用侧]</a></li>
+  <li><strong>601 行清掉目标对象的 DEX 代码偏移。</strong> <code>dex_code_item_offset_</code> 是 <code>code_item</code> 在 DEX 文件里的偏移。设为 <code>0</code> 后，通过这个目标对象查 <code>GetCodeItem()</code> 会得到 <code>nullptr</code>。这行只改目标对象的字段，DEX 文件的原指令没有被擦除。前面第 567 行已经复制了方法对象，所以对原本带 DEX 方法体的 Java 方法，备份对象仍有原偏移，执行原方法可以走备份对象。<a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method-inl.h#L327-L329">[读取偏移]</a> <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/dex_file.h#L739-L746">[零偏移的含义]</a></li>
+</ol>
+<div id="entry-implementation"><h4>展开看三个 setter 的实现</h4>
+<details class="setter-detail" open><summary>599 行 · JNI 槽怎样写入和读回</summary><div class="setter-body">
+<p><code>EnableXposedHook()</code> 的第 599 行先调用 <code>SetEntryPointFromJniPtrSize()</code>。传进来的 <code>entrypoint</code> 就是 <code>hook_info</code> 的地址，<code>pointer_size</code> 来自 <code>sizeof(void*)</code>。</p>
+<figure class="pointer-map" id="jni-slot-map">
+  <figcaption>第 599 行写入后，JNI 槽指向哪里？</figcaption>
+  <div class="pointer-map-grid">
+    <dl class="pointer-object">
+      <dt>目标 <code>ArtMethod</code></dt>
+      <dd class="pointer-field"><strong>JNI 槽</strong> <code>entry_point_from_jni_</code><small>存入 <code>hook_info</code> 的地址</small></dd>
+      <dd><strong>quick 槽</strong><small>这个字段在第 600 行才改写</small></dd>
+    </dl>
+    <div class="pointer-arrow" aria-label="JNI 槽指向 Hook 信息对象">指向<span class="across" aria-hidden="true">⟶</span><span class="down" aria-hidden="true">↓</span></div>
+    <dl class="pointer-object">
+      <dt>单独存放的 <code>XposedHookInfo</code></dt>
+      <dd><code>additional_info</code><small>包含回调集合等附加信息</small></dd>
+      <dd><code>original_method</code>、<code>reflected_method</code><small>原方法备份，以及指向备份的反射对象</small></dd>
+    </dl>
+  </div>
+  <p class="pointer-caption">第 599 行只把一个地址存进 JNI 槽。代理进入分发逻辑后，<code>GetXposedHookInfo()</code> 读回这个地址，再访问它指向的对象。</p>
+</figure>
+<p><code>reinterpret_cast&lt;uint8_t*&gt;(hook_info)</code> 转换指针类型，地址值保持相同。<code>sizeof(void*)</code> 指定写入的指针宽度，64 位写 8 字节，32 位写 4 字节。</p>
+<p>进入 setter 后，第 594 行把 <code>EntryPointFromJniOffset(pointer_size)</code> 写在 <code>SetNativePointer()</code> 的第一个实参里。C++ 要先算出这个实参，才能调用外层函数。把第 594 行拆开看，就是下面两步。</p>
+<div class="codeblock"><div class="code-label">第 594 行拆解 · 等价写法</div><pre><code>const MemberOffset offset = EntryPointFromJniOffset(pointer_size);
+SetNativePointer(offset, entrypoint, pointer_size);</code></pre></div>
+<p>第一步得到的是<strong>相对目标 <code>ArtMethod</code> 起点的字节偏移</strong>，第二步才把 <code>hook_info</code> 指针写进那个槽。下面按调用顺序列出 setter 和算偏移的函数。最后的 <code>GetXposedHookInfo()</code> 是之后分发时才走的读回路径。</p>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>art_method.h</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.h#L592-L595">592–595 行</a> · <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.h#L539-L542">539–542 行</a> · <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.h#L748-L751">748–751 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/art_method.h</code></div>
+  <div class="source-context"><strong>源码符号</strong><code>ArtMethod::SetEntryPointFromJniPtrSize() / EntryPointFromJniOffset() / GetXposedHookInfo()</code></div>
+  <pre tabindex="0" aria-label="ArtMethod JNI 槽写入与读回"><code> 592 │   ALWAYS_INLINE void SetEntryPointFromJniPtrSize(const void* entrypoint, size_t pointer_size) {
+ 593 │     DCHECK(Runtime::Current()-&gt;IsAotCompiler() || !IsXposedHookedMethod());
+<span class="source-note"><span class="source-note-label">注释</span><span>先调用括号内的 EntryPointFromJniOffset，再用返回的偏移写指针。</span></span> 594 │     SetNativePointer(EntryPointFromJniOffset(pointer_size), entrypoint, pointer_size);
+ 595 │   }
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>第 594 行调用的就是这个函数。它只计算偏移，不写内存。</span></span> 539 │   static MemberOffset EntryPointFromJniOffset(size_t pointer_size) {
+ 540 │     return MemberOffset(PtrSizedFieldsOffset(pointer_size) + OFFSETOF_MEMBER(
+ 541 │         PtrSizedFields, entry_point_from_jni_) / sizeof(void*) * pointer_size);
+ 542 │   }
+     …
+ 748 │   const XposedHookInfo* GetXposedHookInfo() {
+ 749 │     DCHECK(IsXposedHookedMethod());
+<span class="source-note"><span class="source-note-label">注释</span><span>从同一个槽读出指针，再按 XposedHookInfo* 使用。</span></span> 750 │     return reinterpret_cast&lt;const XposedHookInfo*&gt;(GetEntryPointFromJniPtrSize(sizeof(void*)));
+ 751 │   }</code></pre>
+</figure></div></details>
+<details class="setter-detail" open><summary>600 行 · 代理地址从哪里来，又写到哪里</summary><div class="setter-body"><p>内层的 <code>GetQuickProxyInvokeHandler()</code> 取汇编符号 <code>art_quick_proxy_invoke_handler</code> 的地址。外层 setter 把这个地址写到 quick 槽。下一次调用从该槽取到的就是这个地址。</p><figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>runtime_asm_entrypoints.h</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/runtime_asm_entrypoints.h#L50-L53">50–53 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/entrypoints/runtime_asm_entrypoints.h</code></div>
+  <div class="source-context"><strong>源码符号</strong><code>art::GetQuickProxyInvokeHandler()</code></div>
+  <pre tabindex="0" aria-label="art::GetQuickProxyInvokeHandler()"><code>  50 │ extern &quot;C&quot; void art_quick_proxy_invoke_handler();
+  51 │ static inline const void* GetQuickProxyInvokeHandler() {
+<span class="source-note"><span class="source-note-label">注释</span><span>返回的是汇编代理入口的地址，此时没有调用代理。</span></span>  52 │   return reinterpret_cast&lt;const void*&gt;(art_quick_proxy_invoke_handler);
+  53 │ }</code></pre>
+</figure>
+<p id="quick-proxy-asm">以 ARM64 为例，<code>art_quick_proxy_invoke_handler</code> 指向已加载的 <code>libart.so</code> 里这段汇编的入口，也就是下面 <code>ENTRY</code> 标出的地址。第 600 行把这个地址存到 quick 槽。之后调用方命中这个入口时，先跑汇编 stub，再由第 1813 行的 <code>bl</code> 调用 C++ 函数 <code>artQuickProxyInvokeHandler()</code>。C++ 处理器识别出 Xposed 方法后，再进入 Java 回调分发。<a href="#before">[接着看 C++ 和 Java 分发]</a></p>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>quick_entrypoints_arm64.S</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/arch/arm64/quick_entrypoints_arm64.S#L1809-L1813">1809–1813 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/arch/arm64/quick_entrypoints_arm64.S</code></div>
+  <div class="source-context"><strong>汇编入口</strong><code>art_quick_proxy_invoke_handler</code></div>
+  <pre tabindex="0" aria-label="ARM64 汇编代理入口"><code><span class="source-note"><span class="source-note-label">注释</span><span>GetQuickProxyInvokeHandler 取的是这个入口的地址。</span></span>1809 │ ENTRY art_quick_proxy_invoke_handler
+1810 │     SETUP_REFS_AND_ARGS_CALLEE_SAVE_FRAME_WITH_METHOD_IN_X0
+1811 │     mov     x2, xSELF                   // pass Thread::Current
+1812 │     mov     x3, sp                      // pass SP
+<span class="source-note"><span class="source-note-label">注释</span><span>准备好栈帧和参数后，再调用 C++ 代理处理器。</span></span>1813 │     bl      artQuickProxyInvokeHandler  // (Method* proxy method, receiver, Thread*, SP)</code></pre>
+  <figcaption class="source-summary">quick 槽指向汇编入口，汇编入口再调用 C++</figcaption>
+</figure>
+<figure class="pointer-map" id="quick-proxy-chain">
+  <figcaption>从 <code>blr x9</code> 到 Java 回调</figcaption>
+  <ol>
+    <li><strong>真正调用时 · 先进入 quick 调用 stub。</strong> 以本文展示的 ARM64 <code>ArtMethod::Invoke()</code> quick 分支为例，实例方法走 <code>art_quick_invoke_stub</code>，静态方法走 <code>art_quick_invoke_static_stub</code>。两个 stub 准备好参数后都会执行同一个宏。宏里的 <code>ldr x9, [x0, #ART_METHOD_QUICK_CODE_OFFSET_64]</code> 从 <code>x0</code> 指向的目标 <code>ArtMethod</code> 读取 quick 槽，随后 <code>blr x9</code> 跳到读出的地址。<code>ART_METHOD_QUICK_CODE_OFFSET_64</code> 是槽在对象里的偏移，<code>x9</code> 里存的是槽中的地址。<a href="#dispatch">[查看 ARM64 调用侧]</a></li>
+    <li><strong>落到汇编入口 · <code>ENTRY art_quick_proxy_invoke_handler</code>。</strong> 安装 Hook 时，第 600 行的 <code>SetEntryPointFromQuickCompiledCode()</code> 已把这个入口的地址写进 quick 槽。因此调用时，<code>blr x9</code> 会跳到这里。代理 stub 准备栈帧和参数，再执行第 1813 行的 <code>bl</code>。</li>
+    <li><strong>C++ 处理器 · <code>artQuickProxyInvokeHandler()</code></strong>。识别出 Xposed Hook 方法后，进入 <code>InvokeXposedHandleHookedMethod()</code>。</li>
+    <li><strong>Java 分发 · <code>XposedBridge.handleHookedMethod()</code></strong>。JNI 辅助函数读回第 599 行写入的 Hook 信息，再通过 <code>CallStaticObjectMethodA</code> 调到这里。</li>
+  </ol>
+  <p class="pointer-caption">第 600 行发生在安装时，负责存入汇编入口的地址。这四步发生在之后真正调用目标方法时。<a href="#before">[查看 C++ 和 JNI 源码]</a></p>
+</figure>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>art_method.h</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.h#L513-L522">513–522 行</a> · <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.h#L544-L547">544–547 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/art_method.h</code></div>
+  <div class="source-context"><strong>源码符号</strong><code>ArtMethod::SetEntryPointFromQuickCompiledCode() / EntryPointFromQuickCompiledCodeOffset()</code></div>
+  <pre tabindex="0" aria-label="ArtMethod::SetEntryPointFromQuickCompiledCode() / EntryPointFromQuickCompiledCodeOffset()"><code> 513 │   void SetEntryPointFromQuickCompiledCode(const void* entry_point_from_quick_compiled_code) {
+<span class="source-note"><span class="source-note-label">注释</span><span>把本机指针宽度传给带 PtrSize 的版本。</span></span> 514 │     SetEntryPointFromQuickCompiledCodePtrSize(entry_point_from_quick_compiled_code,
+ 515 │                                               sizeof(void*));
+ 516 │   }
+ 517 │   ALWAYS_INLINE void SetEntryPointFromQuickCompiledCodePtrSize(
+ 518 │       const void* entry_point_from_quick_compiled_code, size_t pointer_size) {
+ 519 │     DCHECK(Runtime::Current()-&gt;IsAotCompiler() || !IsXposedHookedMethod());
+<span class="source-note"><span class="source-note-label">注释</span><span>用 quick 槽的偏移调用共享写入函数。</span></span> 520 │     SetNativePointer(EntryPointFromQuickCompiledCodeOffset(pointer_size),
+ 521 │                      entry_point_from_quick_compiled_code, pointer_size);
+ 522 │   }
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>这里定位的是 quick 槽，字段名与 JNI 槽不同。</span></span> 544 │   static MemberOffset EntryPointFromQuickCompiledCodeOffset(size_t pointer_size) {
+ 545 │     return MemberOffset(PtrSizedFieldsOffset(pointer_size) + OFFSETOF_MEMBER(
+ 546 │         PtrSizedFields, entry_point_from_quick_compiled_code_) / sizeof(void*) * pointer_size);
+ 547 │   }</code></pre>
+</figure></div></details>
+<details class="setter-detail" open><summary>599、600 行共用 · SetNativePointer() 最终写哪</summary><div class="setter-body"><p>两行走的是同一个写入函数。用 <code>ArtMethod</code> 对象地址加上字段偏移，得到槽的地址，再按指针宽度写入 4 或 8 字节。两个调用的区别在传入的字段偏移和指针值。</p><figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>art_method.h</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.h#L833-L844">833–844 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/art_method.h</code></div>
+  <div class="source-context"><strong>源码符号</strong><code>ArtMethod::SetNativePointer()</code></div>
+  <pre tabindex="0" aria-label="ArtMethod::SetNativePointer()"><code> 833 │   template&lt;typename T&gt;
+ 834 │   ALWAYS_INLINE void SetNativePointer(MemberOffset offset, T new_value, size_t pointer_size) {
+ 835 │     static_assert(std::is_pointer&lt;T&gt;::value, &quot;T must be a pointer type&quot;);
+ 836 │     DCHECK(ValidPointerSize(pointer_size)) &lt;&lt; pointer_size;
+<span class="source-note"><span class="source-note-label">注释</span><span>先算出槽自身的内存地址。</span></span> 837 │     const auto addr = reinterpret_cast&lt;uintptr_t&gt;(this) + offset.Uint32Value();
+<span class="source-note"><span class="source-note-label">注释</span><span>32 位布局写 4 字节，64 位布局走下面的分支写 8 字节。</span></span> 838 │     if (pointer_size == sizeof(uint32_t)) {
+ 839 │       uintptr_t ptr = reinterpret_cast&lt;uintptr_t&gt;(new_value);
+ 840 │       *reinterpret_cast&lt;uint32_t*&gt;(addr) = dchecked_integral_cast&lt;uint32_t&gt;(ptr);
+ 841 │     } else {
+ 842 │       *reinterpret_cast&lt;uint64_t*&gt;(addr) = reinterpret_cast&lt;uintptr_t&gt;(new_value);
+ 843 │     }
+ 844 │   }</code></pre>
+</figure></div></details>
+<details class="setter-detail" open><summary>601 行 · 为什么写 0 之后查不到方法体</summary><div class="setter-body"><p>这一行是普通整数赋值。后续查方法体时，<code>ArtMethod::GetCodeItem()</code> 把偏移传给 DEX 查询函数。偏移为 0 时，查询直接返回空指针。备份 <code>ArtMethod</code> 是改写前复制的，原偏移仍在备份里。</p><figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>art_method.h</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.h#L437-L444">437–444 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/art_method.h</code></div>
+  <div class="source-context"><strong>源码符号</strong><code>ArtMethod::GetCodeItemOffset() / SetCodeItemOffset()</code></div>
+  <pre tabindex="0" aria-label="ArtMethod::GetCodeItemOffset() / SetCodeItemOffset()"><code> 437 │   uint32_t GetCodeItemOffset() {
+ 438 │     return dex_code_item_offset_;
+ 439 │   }
+ 440 │ 
+ 441 │   void SetCodeItemOffset(uint32_t new_code_off) {
+ 442 │     // Not called within a transaction.
+<span class="source-note"><span class="source-note-label">注释</span><span>只更新当前 ArtMethod 的偏移字段。</span></span> 443 │     dex_code_item_offset_ = new_code_off;
+ 444 │   }</code></pre>
+</figure>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>art_method-inl.h</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method-inl.h#L327-L329">327–329 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/art_method-inl.h</code></div>
+  <div class="source-context"><strong>源码符号</strong><code>ArtMethod::GetCodeItem()</code></div>
+  <pre tabindex="0" aria-label="ArtMethod::GetCodeItem()"><code> 327 │ inline const DexFile::CodeItem* ArtMethod::GetCodeItem() {
+<span class="source-note"><span class="source-note-label">注释</span><span>把当前方法的偏移交给其声明类所属的 DEX 文件。</span></span> 328 │   return GetDeclaringClass()-&gt;GetDexFile().GetCodeItem(GetCodeItemOffset());
+ 329 │ }</code></pre>
+</figure>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>dex_file.h</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/dex_file.h#L739-L746">739–746 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/dex_file.h</code></div>
+  <div class="source-context"><strong>源码符号</strong><code>DexFile::GetCodeItem()</code></div>
+  <pre tabindex="0" aria-label="DexFile::GetCodeItem()"><code> 739 │   const CodeItem* GetCodeItem(const uint32_t code_off) const {
+ 740 │     DCHECK_LT(code_off, size_) &lt;&lt; &quot;Code item offset larger then maximum allowed offset&quot;;
+<span class="source-note"><span class="source-note-label">注释</span><span>零偏移表示没有 code item，直接返回空指针。</span></span> 741 │     if (code_off == 0) {
+ 742 │       return nullptr;  // native or abstract method
+ 743 │     } else {
+<span class="source-note"><span class="source-note-label">注释</span><span>非零时，才用 DEX 起始地址加偏移定位 code item。</span></span> 744 │       const uint8_t* addr = begin_ + code_off;
+ 745 │       return reinterpret_cast&lt;const CodeItem*&gt;(addr);
+ 746 │     }</code></pre>
+</figure></div></details></div>
+<p>源码还处理了调用者失效、JIT 旧代码和线程栈。<a href="#ref-art">[查看完整函数]</a></p>
+</section>
+
+<section id="dispatch" class="chapter">
+<h2>执行 · 一次调用如何经过 Hook</h2>
+
+<h3>原生 ART 的调用入口</h3>
+<a class="animation-link" href="xposed-art-animation.html#normal" data-flow-animation="normal">看动画 · 正常执行</a>
+<p>本节用 <code>Method.invoke()</code> 举例，因为这条路径可以在源码里逐步追到 ARM64 quick stub。直接写 <code>Gate.check("demo")</code> 时，调用点可能走另一条路径。后面的 Hook 时序图从<strong>调用已经命中改写后的 quick 入口</strong>开始，两种调用方式都可能到达这个位置。</p>
+<p>这里从 <strong>Java 反射调用 <code>Method.invoke()</code></strong> 追一条完整路径。ART 在 JNI 注册表里把 Java 的 <code>invoke</code> 绑定到 <code>Method_invoke</code>。该函数进入 <code>InvokeMethod</code>，解析出目标 <code>ArtMethod*</code>、整理实参，再由 <code>InvokeWithArgArray</code> 调用它的 <code>Invoke()</code>。</p>
+<p><code>Method.invoke()</code> → <code>art::Method_invoke()</code> → <code>art::InvokeMethod()</code> → <code>art::InvokeWithArgArray()</code> → <code>art::ArtMethod::Invoke()</code></p>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>java_lang_reflect_Method.cc</code></strong><span class="source-ranges"><a href="https://android.googlesource.com/platform/art/+/refs/tags/android-7.1.2_r39/runtime/native/java_lang_reflect_Method.cc#99">99–102 行</a> · <a href="https://android.googlesource.com/platform/art/+/refs/tags/android-7.1.2_r39/runtime/native/java_lang_reflect_Method.cc#111">111 行</a></span></div>
+  <div class="source-metadata"><span>AOSP art · android-7.1.2_r39</span><code>runtime/native/java_lang_reflect_Method.cc</code></div>
+  <div class="source-context"><strong>所在函数</strong><code>art::Method_invoke()</code></div>
+  <pre tabindex="0" aria-label="Java 反射调用的 JNI 入口"><code><span class="source-note"><span class="source-note-label">注释</span><span>JNI 入口接收反射方法、接收者对象和参数数组。</span></span>  99 │ static jobject Method_invoke(JNIEnv* env, jobject javaMethod, jobject javaReceiver,
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>把这三项交给 ART 的反射调用实现。</span></span> 102 │   return InvokeMethod(soa, javaMethod, javaReceiver, javaArgs);</code></pre>
+  <figcaption class="source-summary">从 Java 的 Method.invoke 进入 ART</figcaption>
+</figure>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>reflection.cc</code></strong><span class="source-ranges"><a href="https://android.googlesource.com/platform/art/+/refs/tags/android-7.1.2_r39/runtime/reflection.cc#578">578 行</a> · <a href="https://android.googlesource.com/platform/art/+/refs/tags/android-7.1.2_r39/runtime/reflection.cc#638">638–645 行</a> · <a href="https://android.googlesource.com/platform/art/+/refs/tags/android-7.1.2_r39/runtime/reflection.cc#431">431–439 行</a></span></div>
+  <div class="source-metadata"><span>AOSP art · android-7.1.2_r39</span><code>runtime/reflection.cc</code></div>
+  <div class="source-context"><strong>所在函数</strong><code>art::InvokeMethod()</code> · <code>art::InvokeWithArgArray()</code></div>
+  <pre tabindex="0" aria-label="AOSP 反射调用交给 ArtMethod::Invoke"><code><span class="source-note"><span class="source-note-label">注释</span><span>InvokeMethod 从反射对象取出 ArtMethod。虚方法可能进一步分派到实际接收者的实现。</span></span> 578 │   ArtMethod* m = abstract_method-&gt;GetArtMethod();
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>实参准备好之后，调用 InvokeWithArgArray。</span></span> 645 │   InvokeWithArgArray(soa, m, &amp;arg_array, &amp;result, shorty);
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>下面是 InvokeWithArgArray 的末尾。method 就是传进来的目标方法，args 是整理好的参数。</span></span> 439 │   method-&gt;Invoke(soa.Self(), args, arg_array-&gt;GetNumBytes(), result, shorty);</code></pre>
+  <figcaption class="source-summary">目标 ArtMethod 和实参如何传进 Invoke</figcaption>
+</figure>
+<p><code>ArtMethod::Invoke()</code> 有解释执行分支。走到下面的 quick 分支时，它按目标是否为静态方法选择不同的 stub，并把 C++ 的 <code>this</code> 作为第一个参数传入。这里的 <code>this</code> 是 <strong>目标 <code>ArtMethod*</code></strong>，Java 接收者已经放在实参里。普通的 Java 编译代码调用还可以直接从调用点进入目标代码，内联时甚至可能省去独立调用。</p>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>art_method.cc</code></strong><span class="source-ranges"><a href="https://android.googlesource.com/platform/art/+/refs/tags/android-7.1.2_r39/runtime/art_method.cc#272">272–273 行</a> · <a href="https://android.googlesource.com/platform/art/+/refs/tags/android-7.1.2_r39/runtime/art_method.cc#288">288–292 行</a></span></div>
+  <div class="source-metadata"><span>AOSP art · android-7.1.2_r39</span><code>runtime/art_method.cc</code></div>
+  <div class="source-context"><strong>所在方法</strong><code>art::ArtMethod::Invoke()</code></div>
+  <pre tabindex="0" aria-label="AOSP 的 quick 调用分支"><code><span class="source-note"><span class="source-note-label">注释</span><span>检查 ArtMethod 是否有可用的 quick 入口地址。</span></span> 272 │     bool have_quick_code = GetEntryPointFromQuickCompiledCode() != nullptr;
+ 273 │     if (LIKELY(have_quick_code)) {
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>实例方法和静态方法使用各自的调用 stub。</span></span> 288 │       if (!IsStatic()) {
+ 289 │         (*art_quick_invoke_stub)(this, args, args_size, self, result, shorty);
+ 290 │       } else {
+ 291 │         (*art_quick_invoke_static_stub)(this, args, args_size, self, result, shorty);
+ 292 │       }</code></pre>
+  <figcaption class="source-summary">AOSP 的 quick 调用分支</figcaption>
+</figure>
+<p>C++ 第 <code>289</code> 行调用实例方法 stub，对应 ARM64 汇编中第 <a href="https://android.googlesource.com/platform/art/+/refs/tags/android-7.1.2_r39/runtime/arch/arm64/quick_entrypoints_arm64.S#665">665 行的 <code>ENTRY art_quick_invoke_stub</code></a>。第 <code>291</code> 行调用静态方法 stub，对应第 <a href="https://android.googlesource.com/platform/art/+/refs/tags/android-7.1.2_r39/runtime/arch/arm64/quick_entrypoints_arm64.S#799">799 行的 <code>ENTRY art_quick_invoke_static_stub</code></a>。两段汇编准备好调用参数后，分别在第 <a href="https://android.googlesource.com/platform/art/+/refs/tags/android-7.1.2_r39/runtime/arch/arm64/quick_entrypoints_arm64.S#787">787</a> 和 <a href="https://android.googlesource.com/platform/art/+/refs/tags/android-7.1.2_r39/runtime/arch/arm64/quick_entrypoints_arm64.S#912">912</a> 行展开同一个宏。第一个参数在 <code>x0</code>，所以宏里用 <code>x0</code> 读取该目标方法的 quick 入口。</p>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>quick_entrypoints_arm64.S</code></strong><span class="source-ranges"><a href="https://android.googlesource.com/platform/art/+/refs/tags/android-7.1.2_r39/runtime/arch/arm64/quick_entrypoints_arm64.S#559">559–561 行</a></span></div>
+  <div class="source-metadata"><span>AOSP art · android-7.1.2_r39</span><code>runtime/arch/arm64/quick_entrypoints_arm64.S</code></div>
+  <div class="source-context"><strong>所在宏</strong><code>INVOKE_STUB_CALL_AND_RETURN</code></div>
+  <pre tabindex="0" aria-label="ARM64 stub 读取 quick 入口并跳转"><code><span class="source-note"><span class="source-note-label">注释</span><span>x0 持有 ArtMethod 指针，从指定偏移读取入口地址到 x9。</span></span> 559 │     ldr x9, [x0, #ART_METHOD_QUICK_CODE_OFFSET_64]
+ 560 │     // Branch to method.
+<span class="source-note"><span class="source-note-label">注释</span><span>调用 x9 指向的代码，并把返回地址保存在 x30。</span></span> 561 │     blr x9</code></pre>
+  <figcaption class="source-summary">ARM64 stub 读取 quick 入口并跳转</figcaption>
+</figure>
+<h3>Hook 安装后的一次调用</h3><figure class="timing"><figcaption>时序图三 · 命中一次 Hook</figcaption><div class="scroll" role="region" tabindex="0" aria-label="时序图三 · 命中一次 Hook"><div class="lifelines" role="group" style="--lanes:5"><div class="lane-row lane-head" aria-hidden="true"><span>应用调用方</span><span>ART 代理</span><span>XposedBridge</span><span>模块回调</span><span>备份方法</span></div><div role="table" aria-label="按时间顺序排列的消息"><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><i aria-hidden="true" style="grid-column:5"></i><div role="cell" class="message forward" style="grid-column:1/3;--edge:25.00000%"><span class="sr-only">应用调用方 → ART 代理，</span>示例方法调用命中 quick 入口</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><i aria-hidden="true" style="grid-column:5"></i><div role="cell" class="message forward" style="grid-column:2/4;--edge:25.00000%"><span class="sr-only">ART 代理 → XposedBridge，</span>经 JNI 进入 handleHookedMethod</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><i aria-hidden="true" style="grid-column:5"></i><div role="cell" class="message forward" style="grid-column:3/5;--edge:25.00000%"><span class="sr-only">XposedBridge → 模块回调，</span>调用 before</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><i aria-hidden="true" style="grid-column:5"></i><div role="cell" class="message back" style="grid-column:3/5;--edge:25.00000%"><span class="sr-only">模块回调 → XposedBridge，</span>交回参数或提前返回状态</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><i aria-hidden="true" style="grid-column:5"></i><div role="cell" class="message forward" style="grid-column:3/6;--edge:16.66667%"><span class="sr-only">XposedBridge → 备份方法，</span>允许继续时，经 native 执行原方法</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><i aria-hidden="true" style="grid-column:5"></i><div role="cell" class="message back" style="grid-column:3/6;--edge:16.66667%"><span class="sr-only">备份方法 → XposedBridge，</span>交回结果或异常</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><i aria-hidden="true" style="grid-column:5"></i><div role="cell" class="message forward" style="grid-column:3/5;--edge:25.00000%"><span class="sr-only">XposedBridge → 模块回调，</span>逆序调用对应的 after</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><i aria-hidden="true" style="grid-column:5"></i><div role="cell" class="message back" style="grid-column:3/5;--edge:25.00000%"><span class="sr-only">模块回调 → XposedBridge，</span>交回回调状态</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><i aria-hidden="true" style="grid-column:5"></i><div role="cell" class="message back" style="grid-column:2/4;--edge:25.00000%"><span class="sr-only">XposedBridge → ART 代理，</span>交回最终结果或异常</div></div><div class="lane-row" role="row"><i aria-hidden="true" style="grid-column:1"></i><i aria-hidden="true" style="grid-column:2"></i><i aria-hidden="true" style="grid-column:3"></i><i aria-hidden="true" style="grid-column:4"></i><i aria-hidden="true" style="grid-column:5"></i><div role="cell" class="message back" style="grid-column:1/3;--edge:25.00000%"><span class="sr-only">ART 代理 → 应用调用方，</span>返回结果或抛出异常</div></div></div></div></div><p>提前返回时跳过「备份方法」的两步。对应的 after 仍可处理结果或异常。</p></figure>
+<p>这次从 ART 侧往回追。代理处理器把调用送到 Java 的 <code>handleHookedMethod</code>，由它决定是否调用备份方法，以及把什么结果交回调用方。<a href="#ref-proxy">[ART 代理]</a> <a href="#ref-bridge">[Java 分发]</a></p>
+<h3 id="before">C++ 代理处理器 <code>artQuickProxyInvokeHandler()</code></h3>
+<a class="animation-link" href="xposed-art-animation.html#invoke" data-flow-animation="invoke">看动画 · 注册后执行</a>
+<p>ARM64 汇编 stub 用 <code>bl artQuickProxyInvokeHandler</code> 进入这个函数。<code>x0</code> 对应目标方法，<code>x1</code> 对应实例方法的接收者，汇编再把当前线程和栈指针放进 <code>x2</code>、<code>x3</code>。<a href="#quick-proxy-asm">[查看汇编调用处]</a></p>
+<ol>
+  <li><strong>先认方法。</strong> 第 847 行用 <code>IsXposedHookedMethod()</code> 检查目标方法的标志。这里读的正是安装 Hook 时第 605 行写入的 <code>kAccXposedHookedMethod</code>，决定后面走 Xposed 分支还是普通动态代理分支。</li>
+  <li><strong>再取实参。</strong> <code>BuildQuickArgumentVisitor</code> 根据 <code>shorty</code> 类型描述从 quick 调用帧读取实参，整理成 <code>std::vector&lt;jvalue&gt;</code>。对象实参转成 JNI 局部引用，方便后续分发期间安全跨过 GC。实例方法的接收者另存为 <code>rcvr_jobj</code>。<a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/quick/quick_trampoline_entrypoints.cc#L798-L837">[参数读取与引用修正]</a></li>
+  <li><strong>按标记分发。</strong> Xposed 方法在第 884 行走 <code>InvokeXposedHandleHookedMethod()</code>，普通动态代理在第 899 行走 <code>InvokeProxyInvocationHandler()</code>。两条路径都会修正调用帧中的对象引用，把结果交回汇编 stub。</li>
+</ol>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>quick_trampoline_entrypoints.cc</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/quick/quick_trampoline_entrypoints.cc#L844-L854">844–854 行</a> · <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/quick/quick_trampoline_entrypoints.cc#L863-L864">863–864 行</a> · <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/quick/quick_trampoline_entrypoints.cc#L870-L886">870–886 行</a> · <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/quick/quick_trampoline_entrypoints.cc#L899-L902">899–902 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/entrypoints/quick/quick_trampoline_entrypoints.cc</code></div>
+  <div class="source-context"><strong>所在函数</strong><code>artQuickProxyInvokeHandler()</code></div>
+  <pre tabindex="0" aria-label="C++ 代理处理器的入口、参数和两条分支"><code><span class="source-note"><span class="source-note-label">注释</span><span>这里接收的是汇编 stub 传来的方法、接收者、线程和栈帧指针。</span></span> 844 │ extern &quot;C&quot; uint64_t artQuickProxyInvokeHandler(
+ 845 │     ArtMethod* proxy_method, mirror::Object* receiver, Thread* self, ArtMethod** sp)
+ 846 │     SHARED_REQUIRES(Locks::mutator_lock_) {
+<span class="source-note"><span class="source-note-label">注释</span><span>先查方法标记，区分 Xposed Hook 和 ART 自带的动态代理。</span></span> 847 │   const bool is_xposed = proxy_method-&gt;IsXposedHookedMethod();
+ 848 │   if (!is_xposed) {
+ 849 │     DCHECK(proxy_method-&gt;IsRealProxyMethod()) &lt;&lt; PrettyMethod(proxy_method);
+ 850 │     DCHECK(receiver-&gt;GetClass()-&gt;IsProxyClass()) &lt;&lt; PrettyMethod(proxy_method);
+ 851 │   }
+ 852 │   // Ensure we don&#x27;t get thread suspension until the object arguments are safely in jobjects.
+<span class="source-note"><span class="source-note-label">注释</span><span>对象实参转成 JNI 局部引用前，暂时禁止线程挂起。</span></span> 853 │   const char* old_cause =
+ 854 │       self-&gt;StartAssertNoThreadSuspension(&quot;Adding to IRT proxy object arguments&quot;);
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>静态方法没有接收者，实例方法则为接收者建立 JNI 局部引用。</span></span> 863 │   const bool is_static = proxy_method-&gt;IsStatic();
+ 864 │   jobject rcvr_jobj = is_static ? nullptr : soa.AddLocalReference&lt;jobject&gt;(receiver);
+     …
+ 870 │   std::vector&lt;jvalue&gt; args;
+ 871 │   uint32_t shorty_len = 0;
+<span class="source-note"><span class="source-note-label">注释</span><span>shorty 描述返回值和参数的类型，供 visitor 按类型读取调用实参。</span></span> 872 │   const char* shorty = non_proxy_method-&gt;GetShorty(&amp;shorty_len);
+ 873 │   BuildQuickArgumentVisitor local_ref_visitor(sp, is_static, shorty, shorty_len, &amp;soa, &amp;args);
+ 874 │ 
+<span class="source-note"><span class="source-note-label">注释</span><span>从 quick 调用帧读取实参，放进 jvalue 数组。</span></span> 875 │   local_ref_visitor.VisitArguments();
+ 876 │   if (!is_static) {
+ 877 │     DCHECK_GT(args.size(), 0U) &lt;&lt; PrettyMethod(proxy_method);
+<span class="source-note"><span class="source-note-label">注释</span><span>实例方法的接收者已单独传递，从 args 中移除这一项。</span></span> 878 │     args.erase(args.begin());
+ 879 │   }
+ 880 │ 
+ 881 │   if (is_xposed) {
+<span class="source-note"><span class="source-note-label">注释</span><span>把目标 ArtMethod 编成 jmethodID，分发函数还要用它找到 Hook 信息。</span></span> 882 │     jmethodID proxy_methodid = soa.EncodeMethod(proxy_method);
+<span class="source-note"><span class="source-note-label">注释</span><span>对象引用准备好后，解除前面的线程挂起限制。</span></span> 883 │     self-&gt;EndAssertNoThreadSuspension(old_cause);
+<span class="source-note"><span class="source-note-label">注释</span><span>把方法标识、接收者和实参交给 Xposed 的 JNI 分发辅助函数。</span></span> 884 │     JValue result = InvokeXposedHandleHookedMethod(soa, shorty, rcvr_jobj, proxy_methodid, args);
+<span class="source-note"><span class="source-note-label">注释</span><span>恢复调用帧中可能因 GC 移动而需要更新的对象引用。</span></span> 885 │     local_ref_visitor.FixupReferences();
+<span class="source-note"><span class="source-note-label">注释</span><span>返回 JValue 中的结果位，交给汇编 stub 恢复调用现场。</span></span> 886 │     return result.GetJ();
+     …
+ 899 │   JValue result = InvokeProxyInvocationHandler(soa, shorty, rcvr_jobj, interface_method_jobj, args);
+ 900 │   // Restore references which might have moved.
+ 901 │   local_ref_visitor.FixupReferences();
+ 902 │   return result.GetJ();</code></pre>
+  <figcaption class="source-summary">同一个 C++ 处理器处理 Xposed Hook 和普通动态代理</figcaption>
+</figure>
+<h3>JNI 辅助函数怎样进入 Java 分发</h3>
+<p><code>CallStaticObjectMethodA()</code> 在这里调用的是 <strong><code>XposedBridge.handleHookedMethod()</code></strong>。启动时，<code>libxposed_common.cpp</code> 用 <code>GetStaticMethodID()</code> 按方法名和签名找到它，随后 <code>libxposed_art.cpp</code> 把类引用存进 <code>xposed_callback_class</code>，把方法 ID 存进 <code>xposed_callback_method</code>。第 280–282 行用的就是这两个值。<a href="https://github.com/rovo89/Xposed/blob/v89/libxposed_common.cpp#L85-L89">[查找方法 ID]</a> <a href="https://github.com/rovo89/Xposed/blob/v89/libxposed_art.cpp#L53-L57">[给两个字段赋值]</a> <a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L307-L309">[Java 方法定义]</a></p>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>entrypoint_utils.cc</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/entrypoint_utils.cc#L280-L282">280–282 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/entrypoints/entrypoint_utils.cc</code></div>
+  <div class="source-context"><strong>所在函数</strong><code>art::InvokeXposedHandleHookedMethod()</code></div>
+  <pre tabindex="0" aria-label="经 JNI 调入 Java 分发入口"><code><span class="source-note"><span class="source-note-label">注释</span><span>调用已登记的 XposedBridge 静态分发方法，传入整理好的 JNI 参数。</span></span> 280 │       soa.Env()-&gt;CallStaticObjectMethodA(ArtMethod::xposed_callback_class,
+ 281 │                                          ArtMethod::xposed_callback_method,
+ 282 │                                          invocation_args);</code></pre>
+  <figcaption class="source-summary">经 JNI 调入 Java 分发入口</figcaption>
+</figure>
+<p>应用之后真的调用 <code>Gate.check("demo")</code>，若执行流命中已改写的目标入口，便进入 ART 的代理 stub。Xposed 修改过的代理处理器识别 <code>kAccXposedHookedMethod</code>，取出 <code>XposedHookInfo</code>，经 JNI 调用 Java 的 <code>XposedBridge.handleHookedMethod</code>。此函数才从已注册的集合中逐个调用模块的 <code>beforeHookedMethod</code>。<a href="#ref-proxy">[代理处理器]</a><a href="#ref-dispatch">[JNI 分发]</a><a href="#ref-bridge">[Java 分发]</a></p>
+<h3 id="original">原方法与提前返回怎么处理？</h3>
+<h4 id="before-callback">第 340 行调用的是哪个 before？</h4>
+<div class="scroll table-wrap" tabindex="0" role="region" aria-label="注册和执行时的方法对象">
+  <table class="data"><caption>同一条 Hook 链上，哪个变量指向哪个方法？</caption>
+    <thead><tr><th scope="col">时点</th><th scope="col">变量</th><th scope="col">对应的方法对象</th></tr></thead>
+    <tbody>
+      <tr><td>注册</td><td><code>XposedBridge.hookMethod()</code> 的 <code>hookMethod</code></td><td>目标方法的反射对象。JNI 由它找到要改写入口的目标 <code>ArtMethod</code>。</td></tr>
+      <tr><td>命中 quick 入口</td><td><code>artQuickProxyInvokeHandler()</code> 的 <code>proxy_method</code></td><td>入口已经改写的目标 <code>ArtMethod</code>，分发代码由它找到 <code>XposedHookInfo</code>。</td></tr>
+      <tr><td>Java 分发</td><td><code>handleHookedMethod()</code> 的 <code>method</code> 和赋值后的 <code>param.method</code></td><td>JNI 从 <code>XposedHookInfo</code> 取出的<strong>备份反射对象</strong>。它关联备份 <code>ArtMethod</code>。</td></tr>
+    </tbody>
+  </table>
+</div>
+<p>用前面 <a href="#register">Gate.check 的模块示例</a> 串起来。模块传给 <code>findAndHookMethod()</code> 的最后一个参数，是 <code>new XC_MethodHook() { … }</code> 创建的匿名子类对象。<code>XposedHelpers</code> 把这个对象交给 <code>XposedBridge.hookMethod()</code>。第 222 行将它加入这个方法专属的回调集合，集合随 <code>AdditionalHookInfo</code> 保存，后面由 JNI 传回 Java 分发函数。<a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedHelpers.java#L184-L187">[取出模块对象]</a> <a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L212-L244">[保存回调集合]</a></p>
+<p>命中 Hook 时，第 320 行取出回调集合的快照。第 331–334 行构造这一轮调用的 <code>MethodHookParam</code>，放入反射方法对象、接收者和实参。第 340 行从快照取出一个对象，调用它的 <code>beforeHookedMethod(param)</code>。这里虽然转成 <code>XC_MethodHook</code> 类型，Java 仍会按对象的实际类型进行虚调用，所以进入的是<strong>模块匿名子类重写的那个方法</strong>。<a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L320-L340">[快照、参数与调用]</a></p>
+<p>例如这次实参为 <code>"block"</code> 时，模块的 <code>beforeHookedMethod()</code> 调用 <code>p.setResult(false)</code>。这个 setter 同时把 <code>returnEarly</code> 设为 <code>true</code>，因此第 358 行的调用原方法分支会被跳过。实参为 <code>"demo"</code> 时，这个示例回调不会设置结果，Java 分发继续走原方法分支。<a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XC_MethodHook.java#L96-L100">[setResult 实现]</a></p>
+
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>XposedBridge.java</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L320">320 行</a> · <a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L331-L334">331–334 行</a> · <a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L339-L340">339–340 行</a> · <a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L350-L353">350–353 行</a> · <a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L358-L364">358–364 行</a> · <a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L368-L374">368–374 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/XposedBridge · v89</span><code>app/src/main/java/de/robv/android/xposed/XposedBridge.java</code></div>
+  <div class="source-context"><strong>所在方法</strong><code>XposedBridge.handleHookedMethod()</code></div>
+  <pre tabindex="0" aria-label="Java 分发的 before、原方法条件和 after"><code><span class="source-note"><span class="source-note-label">注释</span><span>先取本轮调用要遍历的回调对象快照。对象来自模块注册。</span></span> 320 │         Object[] callbacksSnapshot = additionalInfo.callbacks.getSnapshot();
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>用同一个 param 把本次调用的方法、接收者和实参交给各回调。</span></span> 331 │         MethodHookParam param = new MethodHookParam();
+ 332 │         param.method = method;
+ 333 │         param.thisObject = thisObject;
+ 334 │         param.args = args;
+     …
+ 339 │             try {
+<span class="source-note"><span class="source-note-label">注释</span><span>取出当前回调，执行它的 before。</span></span> 340 │                 ((XC_MethodHook) callbacksSnapshot[beforeIdx]).beforeHookedMethod(param);
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>提前返回时停止后续 before，并把当前回调计入 after 的范围。</span></span> 350 │             if (param.returnEarly) {
+ 351 │                 // skip remaining &quot;before&quot; callbacks and corresponding &quot;after&quot; callbacks
+ 352 │                 beforeIdx++;
+ 353 │                 break;
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>只有允许继续时才调用原方法，并把结果写回参数对象。</span></span> 358 │         if (!param.returnEarly) {
+ 359 │             try {
+<span class="source-note"><span class="source-note-label">注释</span><span>先执行括号里的 invokeOriginalMethodNative()。这里的 method 已指向原方法备份，originalMethodId 为 1，表示备份已找到。native 用 param.thisObject 和可能被 before 修改过的 param.args 执行原方法。正常返回后，外层的 param.setResult() 才保存结果，供后续 after 回调读取或修改。</span></span>
+ 360 │                 param.setResult(invokeOriginalMethodNative(method, originalMethodId,
+ 361 │                         additionalInfo.parameterTypes, additionalInfo.returnType, param.thisObject, param.args));
+ 362 │             } catch (InvocationTargetException e) {
+<span class="source-note"><span class="source-note-label">注释</span><span>保存原方法抛出的实际异常，供 after 读取或改写。</span></span> 363 │                 param.setThrowable(e.getCause());
+ 364 │             }
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>从最后一个已执行的 before 开始，逆序调用对应的 after。</span></span> 368 │         int afterIdx = beforeIdx - 1;
+ 369 │         do {
+ 370 │             Object lastResult =  param.getResult();
+ 371 │             Throwable lastThrowable = param.getThrowable();
+ 372 │ 
+ 373 │             try {
+ 374 │                 ((XC_MethodHook) callbacksSnapshot[afterIdx]).afterHookedMethod(param);</code></pre>
+  <figcaption class="source-summary">Java 分发的 before、原方法条件和 after</figcaption>
+</figure>
+
+<h4 id="original-call">第 360 行怎样执行原来的方法？</h4>
+<p id="original-jni-binding"><strong>谁调用 C++ 的 <code>XposedBridge_invokeOriginalMethodNative()</code>？</strong> 调用点就在 Java 的 <code>XposedBridge.handleHookedMethod()</code> 第 360 行。<code>before</code> 执行完且 <code>returnEarly</code> 为 <code>false</code> 时，它调用同一个类的 <code>invokeOriginalMethodNative()</code>。这个 Java 方法在第 429 行声明为 <code>native</code>。Xposed 初始化时通过 JNI 注册表把它绑定到 <code>libxposed_art.cpp</code> 第 98 行的 C++ 函数，因此 ART 执行这次 Java 调用时会进入该函数。<a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L357-L364">[Java 调用点]</a> <a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L429-L431">[native 声明]</a> <a href="https://github.com/rovo89/Xposed/blob/v89/libxposed_common.cpp#L350-L360">[JNI 注册表]</a></p>
+<ol>
+  <li><strong>Java 拿到的 <code>method</code> 已经指向备份。</strong> 安装 Hook 时，ART 用备份 <code>ArtMethod</code> 创建反射对象并存进 <code>hook_info-&gt;reflected_method</code>。分发前，JNI 把该对象放入 <code>invocation_args[0]</code>，又在 <code>invocation_args[1]</code> 放入 <code>1</code>。因此 Java 的 <code>method</code> 是备份的反射对象，<code>originalMethodId</code> 在这条 ART 路径上作为 native 的 <code>isResolved</code> 标志。<a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.cc#L566-L583">[创建并保存备份]</a></li>
+  <li><strong>native 直接使用这个备份。</strong> 第 360 行调用 <code>invokeOriginalMethodNative(method, …)</code>。因为 <code>isResolved == 1</code>，JNI 实现跳过重新找备份的分支，直接把反射对象、接收者和可能被 before 修改过的参数传给 ART 的 <code>InvokeMethod()</code>。</li>
+</ol>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>entrypoint_utils.cc</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/entrypoint_utils.cc#L273-L278">273–278 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/entrypoints/entrypoint_utils.cc</code></div>
+  <div class="source-context"><strong>所在函数</strong><code>art::InvokeXposedHandleHookedMethod()</code></div>
+  <pre tabindex="0" aria-label="art::InvokeXposedHandleHookedMethod()"><code> 273 │   jvalue invocation_args[5];
+<span class="source-note"><span class="source-note-label">注释</span><span>Java 的第一个实参是备份的反射对象。</span></span> 274 │   invocation_args[0].l = hook_info-&gt;reflected_method;
+<span class="source-note"><span class="source-note-label">注释</span><span>1 表示传入的原方法已解析。</span></span> 275 │   invocation_args[1].i = 1;
+ 276 │   invocation_args[2].l = hook_info-&gt;additional_info;
+ 277 │   invocation_args[3].l = rcvr_jobj;
+ 278 │   invocation_args[4].l = args_jobj;</code></pre>
+</figure>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>libxposed_art.cpp</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/Xposed/blob/v89/libxposed_art.cpp#L98-L108">98–108 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/Xposed · v89</span><code>libxposed_art.cpp</code></div>
+  <div class="source-context"><strong>所在函数</strong><code>xposed::XposedBridge_invokeOriginalMethodNative()</code></div>
+  <pre tabindex="0" aria-label="xposed::XposedBridge_invokeOriginalMethodNative()"><code>  98 │ jobject XposedBridge_invokeOriginalMethodNative(JNIEnv* env, jclass, jobject javaMethod,
+  99 │             jint isResolved, jobjectArray, jclass, jobject javaReceiver, jobjectArray javaArgs) {
+ 100 │     ScopedFastNativeObjectAccess soa(env);
+<span class="source-note"><span class="source-note-label">注释</span><span>Java 分发传入 1，因此这一分支不会执行。</span></span> 101 │     if (UNLIKELY(!isResolved)) {
+ 102 │         ArtMethod* artMethod = ArtMethod::FromReflectedMethod(soa, javaMethod);
+ 103 │         if (LIKELY(artMethod-&gt;IsXposedHookedMethod())) {
+ 104 │             javaMethod = artMethod-&gt;GetXposedHookInfo()-&gt;reflected_method;
+ 105 │         }
+ 106 │     }
+ 107 │ #if PLATFORM_SDK_VERSION &gt;= 23
+<span class="source-note"><span class="source-note-label">注释</span><span>SDK 25 走这条路径，使用已经指向备份的 javaMethod。</span></span> 108 │     return InvokeMethod(soa, javaMethod, javaReceiver, javaArgs);</code></pre>
+</figure>
+<h4 id="original-virtual-call">谁调用 FindVirtualMethodForVirtualOrInterface()？</h4>
+<p>上面的 <code>libxposed_art.cpp</code> 第 108 行把备份的反射对象交给 <code>art::InvokeMethod()</code>。进到下面的 <code>reflection.cc</code>，第 578 行从反射对象取出 <code>ArtMethod* m</code>。如果示例中的 <code>Gate.check()</code> 是实例方法，第 605 行就通过接收者的实际类调用 <code>FindVirtualMethodForVirtualOrInterface(m, …)</code>。</p>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>reflection.cc</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/reflection.cc#L565-L566">565–566 行</a> · <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/reflection.cc#L576-L578">576–578 行</a> · <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/reflection.cc#L590-L607">590–607 行</a> · <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/reflection.cc#L645">645 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/reflection.cc</code></div>
+  <div class="source-context"><strong>所在函数</strong><code>art::InvokeMethod()</code></div>
+  <pre tabindex="0" aria-label="反射实现第 605 行进入虚方法查找"><code><span class="source-note"><span class="source-note-label">注释</span><span>libxposed_art.cpp 第 108 行直接调用的就是这个函数。</span></span> 565 │ jobject InvokeMethod(const ScopedObjectAccessAlreadyRunnable&amp; soa, jobject javaMethod,
+ 566 │                      jobject javaReceiver, jobject javaArgs, size_t num_frames) {
+     …
+ 576 │   auto* abstract_method = soa.Decode&lt;mirror::AbstractMethod*&gt;(javaMethod);
+ 577 │   const bool accessible = abstract_method-&gt;IsAccessible();
+<span class="source-note"><span class="source-note-label">注释</span><span>javaMethod 已指向备份，取出的 m 就是备份 ArtMethod。</span></span> 578 │   ArtMethod* m = abstract_method-&gt;GetArtMethod();
+     …
+ 590 │   mirror::Object* receiver = nullptr;
+<span class="source-note"><span class="source-note-label">注释</span><span>只有实例方法进入这个分支。静态方法不用按接收者查找。</span></span> 591 │   if (!m-&gt;IsStatic()) {
+ 592 │     // Replace calls to String.&lt;init&gt; with equivalent StringFactory call.
+ 593 │     if (declaring_class-&gt;IsStringClass() &amp;&amp; m-&gt;IsConstructor()) {
+ 594 │       jmethodID mid = soa.EncodeMethod(m);
+ 595 │       m = soa.DecodeMethod(WellKnownClasses::StringInitToStringFactoryMethodID(mid));
+ 596 │       CHECK(javaReceiver == nullptr);
+ 597 │     } else {
+ 598 │       // Check that the receiver is non-null and an instance of the field&#x27;s declaring class.
+<span class="source-note"><span class="source-note-label">注释</span><span>从 javaReceiver 取出接收者，再检查它和声明类是否匹配。</span></span> 599 │       receiver = soa.Decode&lt;mirror::Object*&gt;(javaReceiver);
+ 600 │       if (!VerifyObjectIsClass(receiver, declaring_class)) {
+ 601 │         return nullptr;
+ 602 │       }
+ 603 │ 
+ 604 │       // Find the actual implementation of the virtual method.
+<span class="source-note"><span class="source-note-label">注释</span><span>这一行调用你问的函数。左边的对象是接收者的实际 Class，传入的 m 是备份。</span></span> 605 │       m = receiver-&gt;GetClass()-&gt;FindVirtualMethodForVirtualOrInterface(m, sizeof(void*));
+ 606 │     }
+ 607 │   }
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>查找返回后，用最终选中的 m 发起调用。对 Xposed 备份，它仍是传入的那个 m。</span></span> 645 │   InvokeWithArgArray(soa, m, &amp;arg_array, &amp;result, shorty);</code></pre>
+  <figcaption class="source-summary">第 605 行从反射调用进入方法查找，第 645 行执行查找返回的方法</figcaption>
+</figure>
+<p><strong>为什么反射调用不会从虚表找回被 Hook 的目标？</strong> <code>InvokeMethod()</code> 从反射对象解出备份 <code>ArtMethod</code>。对于实例方法，它还会走 <code>FindVirtualMethodForVirtualOrInterface()</code>。备份对象在创建时已加上 <code>kAccXposedOriginalMethod</code>，而 <code>IsDirectOrOriginal()</code> 识别这个标记，所以函数直接返回传入的备份，跳过后面的虚表查找。随后 <code>InvokeWithArgArray()</code> 调用这个<strong>备份对象</strong>的 <code>Invoke()</code>，沿备份自身的执行入口运行原实现。<a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/reflection.cc#L576-L605">[取出 ArtMethod、处理实例方法]</a> <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.h#L304-L311">[识别原方法标记]</a> <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/reflection.cc#L638-L645">[提交调用]</a> <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/reflection.cc#L431-L439">[进入 Invoke]</a></p>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>class-inl.h</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/mirror/class-inl.h#L511-L520">511–520 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/mirror/class-inl.h</code></div>
+  <div class="source-context"><strong>所在函数</strong><code>art::mirror::Class::FindVirtualMethodForVirtualOrInterface()</code></div>
+  <pre tabindex="0" aria-label="art::mirror::Class::FindVirtualMethodForVirtualOrInterface()"><code> 511 │ inline ArtMethod* Class::FindVirtualMethodForVirtualOrInterface(ArtMethod* method,
+ 512 │                                                                 size_t pointer_size) {
+<span class="source-note"><span class="source-note-label">注释</span><span>备份带 Xposed 原方法标记，因此直接返回它。</span></span> 513 │   if (method-&gt;IsDirectOrOriginal()) {
+ 514 │     return method;
+ 515 │   }
+ 516 │   if (method-&gt;GetDeclaringClass()-&gt;IsInterface() &amp;&amp; !method-&gt;IsCopied()) {
+ 517 │     return FindVirtualMethodForInterface(method, pointer_size);
+ 518 │   }
+ 519 │   return FindVirtualMethodForVirtual(method, pointer_size);
+ 520 │ }</code></pre>
+</figure>
+<p>原方法的结果或异常回到同一个 <code>MethodHookParam</code>，再逆序执行已运行过 before 的那些回调所对应的 after，最后返回结果或抛出异常。<a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L357-L390">[原方法返回与 after]</a></p>
+<p class="muted">如果模块主动调用公开的 <code>XposedBridge.invokeOriginalMethod()</code>，Java 会传入 <code>0</code>。这时 JNI 才会检查传入的方法是否被 Hook，并从 <code>XposedHookInfo</code> 找到对应备份。<a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L469-L480">[公开 API 传入 0]</a></p>
+
+<h3 id="return-to-caller">回调结果怎样回到调用方？</h3>
+<p>以 <code>Gate.check("block")</code> 为例，<code>before</code> 设定 <code>false</code> 并跳过原方法。如果后续 <code>after</code> 保留了这个结果，它就沿下列路径回到调用方。</p>
+<ol>
+  <li><strong>Java 返回装箱结果。</strong> <code>handleHookedMethod()</code> 的返回类型是 <code>Object</code>，所以此时返回的是 <code>Boolean.FALSE</code>。JNI 的 <code>CallStaticObjectMethodA()</code> 收到这个对象。<a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java#L386-L391">[Java 返回位置]</a></li>
+  <li><strong>ART 拆箱。</strong> <code>InvokeXposedHandleHookedMethod()</code> 按目标方法的返回类型调用 <code>UnboxPrimitiveForResult()</code>，把 <code>Boolean</code> 转回原始 <code>boolean</code> 的值，放进 <code>JValue</code>。C++ 代理处理器再用 <code>result.GetJ()</code> 把结果位交给汇编。<a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/entrypoint_utils.cc#L285-L302">[ART 拆箱源码]</a> <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/quick/quick_trampoline_entrypoints.cc#L881-L886">[C++ 返回源码]</a></li>
+  <li><strong>汇编返回。</strong> ARM64 代理 stub 确认没有待处理异常后恢复现场并执行 <code>ret</code>。沿上面展示的反射调用路径，它回到 <code>blr x9</code> 的下一条指令，调用 stub 再把 <code>x0</code> 里的结果写到 <code>JValue* result</code>。如果有待处理异常，代理 stub 转到异常分发分支。<a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/arch/arm64/quick_entrypoints_arm64.S#L1813-L1822">[代理返回与异常]</a> <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/arch/arm64/quick_entrypoints_arm64.S#L592-L622">[调用 stub 保存返回值]</a></li>
+</ol>
+
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>entrypoint_utils.cc</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/entrypoint_utils.cc#L286-L288">286–288 行</a> · <a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/entrypoint_utils.cc#L296-L302">296–302 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/entrypoints/entrypoint_utils.cc</code></div>
+  <div class="source-context"><strong>所在函数</strong><code>art::InvokeXposedHandleHookedMethod()</code></div>
+  <pre tabindex="0" aria-label="JNI 返回后检查异常并拆箱"><code><span class="source-note"><span class="source-note-label">注释</span><span>如果 Java 抛了异常，异常仍保留在线程上，后面的汇编会检查它。</span></span> 286 │   if (UNLIKELY(soa.Self()-&gt;IsExceptionPending())) {
+ 287 │     return zero;
+ 288 │   } else {
+     …
+ 296 │     JValue result_unboxed;
+<span class="source-note"><span class="source-note-label">注释</span><span>以示例的 boolean 为例，这里把 Java 返回的 Boolean 拆成原始值。</span></span> 297 │     if (!UnboxPrimitiveForResult(result_ref, result_type, &amp;result_unboxed)) {
+ 298 │       DCHECK(soa.Self()-&gt;IsExceptionPending());
+ 299 │       return zero;
+ 300 │     }
+ 301 │     return result_unboxed;
+ 302 │   }</code></pre>
+  <figcaption class="source-summary">Java 返回对象后，ART 拿到目标方法真正要返回的值</figcaption>
+</figure>
+<figure class="codeblock source-excerpt">
+  <div class="source-filebar"><strong><code>quick_entrypoints_arm64.S</code></strong><span class="source-ranges"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/arch/arm64/quick_entrypoints_arm64.S#L1814-L1821">1814–1821 行</a></span></div>
+  <div class="source-metadata"><span>rovo89/android_art · v89-sdk25</span><code>runtime/arch/arm64/quick_entrypoints_arm64.S</code></div>
+  <div class="source-context"><strong>汇编入口</strong><code>art_quick_proxy_invoke_handler</code></div>
+  <pre tabindex="0" aria-label="代理 stub 正常返回或交给异常处理"><code>1814 │     ldr     x2, [xSELF, THREAD_EXCEPTION_OFFSET]
+<span class="source-note"><span class="source-note-label">注释</span><span>线程上有待处理异常就跳到异常分支。正常结果则从 ret 返回。</span></span>1815 │     cbnz    x2, .Lexception_in_proxy    // success if no exception is pending
+1816 │     RESTORE_REFS_AND_ARGS_CALLEE_SAVE_FRAME // Restore frame
+1817 │     fmov    d0, x0                      // Store result in d0 in case it was float or double
+1818 │     ret                                 // return on success
+1819 │ .Lexception_in_proxy:
+1820 │     RESTORE_REFS_AND_ARGS_CALLEE_SAVE_FRAME
+1821 │     DELIVER_PENDING_EXCEPTION</code></pre>
+  <figcaption class="source-summary">代理 stub 在这里选择正常返回或分发异常</figcaption>
+</figure>
+<p>本文举例用的是 <code>Method.invoke()</code>。ART 收到调用 stub 写回的 <code>JValue</code> 之后，还会把基本类型装箱再返回给反射调用方。示例里这里会再次得到 <code>Boolean</code>。如果调用抛出异常，反射层会把它包装成 <code>InvocationTargetException</code>。<a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/reflection.cc#L645-L670">[反射层的返回与异常包装]</a></p>
+
+<h3 id="limits">JIT、AOT 与内联的边界</h3>
+<p>Hook 能否命中，关键是调用是否经过被改写的目标方法入口。JIT/AOT 已编译的调用者可能保留旧状态，因此经典 Xposed 安装时会使相关调用者失效、处理 JIT 代码和线程栈。若调用方已把目标方法<strong>内联</strong>进自己的代码，就可能没有独立的 <code>Gate.check</code> 调用边可拦截；此时需要考虑对调用方去优化或调整 Hook 点。<a href="#ref-art">[ART fork]</a><a href="#ref-lsplant">[LSPlant 的内联说明]</a></p>
+</section>
+
+<section id="timelines" class="chapter">
+<h2>对照表</h2>
+
+
+
+<div id="versions" class="scroll table-wrap" role="region" tabindex="0" aria-label="Android 与经典 Xposed 版本对照"><table class="data"><caption>Android 与经典 Xposed 版本对照</caption><thead><tr><th>Android 系统</th><th>经典 Xposed Framework</th><th>本文如何使用</th></tr></thead><tbody><tr><td>7.1.2 · API 25 · Nougat MR2</td><td><code>v89-sdk25</code></td><td><strong>逐行源码基准</strong>；下面的 <code>CopyFrom</code>、<code>EnableXposedHook</code>、quick 代理入口按此标签说明。</td></tr><tr><td>7.1.x · API 25</td><td><code>v88-sdk25</code>、<code>v88.1-sdk25</code>、<code>v88.2-sdk25</code>、<code>v89-sdk25</code></td><td>这些官方 ART 标签都含备份 <code>ArtMethod</code> 和设置 <code>GetQuickProxyInvokeHandler()</code> 的核心路径；具体细节以各自标签为准。</td></tr><tr><td>7.0 · API 24</td><td><code>v88-sdk24</code>、<code>v88.1-sdk24</code>、<code>v88.2-sdk24</code>、<code>v89-sdk24</code></td><td>属于同一代 Nougat 实现，需读 <code>sdk24</code> 标签；本文不把 SDK 25 的源码行号直接套到它上面。</td></tr></tbody></table></div>
+<div class="scroll table-wrap" role="region" tabindex="0" aria-label="注册前后 quick 入口对照"><table class="data"><caption>注册前后 quick 入口对照</caption><thead><tr><th>观察时点</th><th>方法对象</th><th>quick 入口去向</th></tr></thead>
+<tbody><tr><td>注册前</td><td>目标 ArtMethod</td><td>原执行路径</td></tr>
+<tr><td>注册后</td><td>同一个目标 ArtMethod</td><td>代理 stub，进入 Hook 分发</td></tr>
+<tr><td>注册后</td><td>备份 ArtMethod</td><td>原执行路径或解释器桥，取决于原入口状态</td></tr></tbody></table></div>
+<div class="scroll table-wrap" role="region" tabindex="0" aria-label="before 对原方法与返回值的影响"><table class="data"><caption>before 对原方法与返回值的影响</caption><thead><tr><th><code>before</code> 的行为</th><th>原方法</th><th><code>after</code></th><th>调用方得到</th></tr></thead><tbody><tr><td>只观察或修改参数</td><td>执行，使用可能已修改的参数</td><td>执行，可修改结果或异常</td><td>最终结果或异常</td></tr><tr><td><code>setResult(false)</code></td><td>跳过</td><td>已执行的 before 所对应的 after 仍可运行</td><td>通常为 <code>false</code>，仍可被 after 改写</td></tr></tbody></table></div>
+</section>
+
+<section id="sources" class="chapter">
+<h2>源码索引</h2>
+
+      <ol class="sources"><li id="ref-versions"><a href="https://github.com/rovo89/android_art/tags">rovo89/android_art 官方标签</a>：列出 v88 至 v89 的 SDK 24/25 标签；<a href="https://github.com/rovo89/android_art/tree/v89-sdk25">v89-sdk25 源码快照</a>；<a href="https://groups.google.com/g/android-building/c/lSlWVBBEjO8">AOSP Nougat MR2 公告</a>：Android 7.1.2；<a href="https://developer.android.com/tools/releases/platforms">Android SDK 平台版本表</a>：7.0 为 API 24，7.1 为 API 25。</li><li id="ref-api-version"><a href="https://github.com/rovo89/XposedBridge/wiki/Using-the-Xposed-Framework-API">rovo89：Xposed Framework API 版本说明</a>：API jar 版本与框架发行版本不能混为一谈。</li><li id="ref-startup"><a href="https://github.com/rovo89/Xposed/blob/v89/app_main.cpp">Xposed · app_main.cpp</a> 与 <a href="https://github.com/rovo89/Xposed/blob/v89/xposed.cpp">xposed.cpp</a>：启动与 <code>dlopen</code>。</li><li id="ref-api"><a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedHelpers.java">XposedHelpers.java</a>：解析目标方法；<a href="https://api.xposed.info/reference/de/robv/android/xposed/IXposedHookLoadPackage.html">IXposedHookLoadPackage API</a>：模块入口。</li><li id="ref-bridge"><a href="https://github.com/rovo89/XposedBridge/blob/v89/app/src/main/java/de/robv/android/xposed/XposedBridge.java">XposedBridge.java</a>：保存回调、<code>handleHookedMethod</code>、原方法调用。</li><li id="ref-native"><a href="https://github.com/rovo89/Xposed/blob/v89/libxposed_art.cpp">libxposed_art.cpp</a>：native Hook 安装和原方法通道。</li><li id="ref-art"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.cc">Xposed ART fork · art_method.cc</a>：<code>EnableXposedHook</code>。</li><li id="ref-copy"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.cc#L492">art_method.cc · CopyFrom</a>：复制方法元数据与 JIT 情况处理。</li><li id="ref-layout"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/art_method.h">Xposed ART fork · art_method.h</a>：<code>ArtMethod</code> 字段与 <code>XposedHookInfo</code>。</li><li id="ref-proxy"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/quick/quick_trampoline_entrypoints.cc">quick_trampoline_entrypoints.cc</a>：代理处理器的 Xposed 分支。</li><li id="ref-dispatch"><a href="https://github.com/rovo89/android_art/blob/v89-sdk25/runtime/entrypoints/entrypoint_utils.cc">entrypoint_utils.cc</a>：经 JNI 调用 Java 分发函数。</li><li id="ref-lsplant"><a href="https://github.com/LSPosed/LSPlant">LSPlant README</a>：现代 LSPosed 的 Hook 引擎及内联边界。</li></ol>
+      <p class="muted">正文摘录标注了源码仓库、版本、文件、所属函数或方法和行号。省略行以省略号标出，模块 Java 示例用于演示 API。</p>
+    
+</section>
+    <footer class="footer">Android Security Notes · Xposed ART Method Hook · 2026</footer>
+  </div></main>
+</div>
+<script>
+  const animationSection = document.getElementById('flow-animations');
+  const animationFrame = document.getElementById('flow-animation-frame');
+  let animationResize;
+  animationFrame.addEventListener('load', () => {
+    animationResize?.disconnect();
+    const body = animationFrame.contentDocument?.body;
+    if (!body) return;
+    const fit = () => {
+      const height = Math.ceil(body.getBoundingClientRect().height);
+      if (height > 0) animationFrame.style.height = height + 2 + 'px';
+    };
+    fit();
+    if ('ResizeObserver' in window) {
+      animationResize = new ResizeObserver(fit);
+      animationResize.observe(body);
+    }
+  });
+  for (const link of document.querySelectorAll('[data-flow-animation]')) {
+    link.addEventListener('click', event => {
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      animationSection.scrollIntoView({block:'start'});
+      const key = link.dataset.flowAnimation;
+      const embedded = animationFrame.contentDocument;
+      const targetTab = embedded?.getElementById('tab-' + key);
+      if (targetTab && embedded.readyState === 'complete') targetTab.click();
+      else animationFrame.src = link.href;
+    });
+  }
+  const links=[...document.querySelectorAll('.toc a')];
+  const sections=links.map(a=>document.querySelector(a.getAttribute('href'))).filter(Boolean);
+  const observer=new IntersectionObserver(entries=>{
+    const visible=entries.filter(e=>e.isIntersecting).sort((a,b)=>a.boundingClientRect.top-b.boundingClientRect.top)[0];
+    if(!visible)return;
+    links.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+visible.target.id));
+  },{rootMargin:'-12% 0px -68% 0px'});
+  sections.forEach(s=>observer.observe(s));
+  document.querySelector('.toc a:not([hidden])')?.classList.add('active');
+</script>
+</body>
+</html>
