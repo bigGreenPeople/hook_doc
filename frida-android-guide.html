@@ -1,0 +1,2088 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frida Android 源码与工作原理导读｜Android Security Notes</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --paper: #ffffff;
+      --sidebar-bg: #eef2f8;
+      --ink: #162338;
+      --sub: #4d5f78;
+      --muted: #687992;
+      --line: #d6e0ec;
+      --line-soft: #e6ecf5;
+      --blue: #224b94;
+      --blue-strong: #193975;
+      --blue-soft: #e9f0fd;
+      --teal: #0e6b5c;
+      --teal-soft: #e7f6f2;
+      --amber: #b45318;
+      --amber-soft: #fff2e8;
+      --code-bg: #111e30;
+      --code-bar: #1a2c44;
+      --code-ink: #eaf1fb;
+      --mono: "Cascadia Code", Consolas, ui-monospace, SFMono-Regular, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.76 var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+    ::selection { background: #c8defe; color: #102138; }
+    a { color: var(--blue); text-underline-offset: 3px; }
+    a:hover { color: var(--blue-strong); }
+    code, pre { font-family: var(--mono); }
+    code {
+      font-size: 0.88em;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #edf2fa;
+      color: #163055;
+      overflow-wrap: anywhere;
+    }
+    pre code { padding: 0; background: transparent; color: inherit; font-size: inherit; }
+    :focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+
+    /* Layout shell */
+    .shell {
+      display: grid;
+      grid-template-columns: 236px minmax(0, 1fr);
+      max-width: 1400px;
+      margin: 0 auto;
+      min-height: 100vh;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--line);
+    }
+    .side-inner {
+      position: sticky;
+      top: 0;
+      max-height: 100vh;
+      overflow: auto;
+      padding: 30px 16px 28px 22px;
+    }
+    .brand {
+      font: 700 11.5px/1.4 var(--mono);
+      letter-spacing: 0.1em;
+      color: var(--blue);
+      margin: 0 0 24px;
+    }
+    .side-title {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 0 0 10px;
+      padding-left: 10px;
+    }
+    .toc { display: grid; gap: 3px; }
+    .toc a {
+      position: relative;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      padding: 7px 10px 7px 12px;
+      border-left: 3px solid transparent;
+      border-radius: 0 6px 6px 0;
+      color: #3a4c66;
+      font-size: 14px;
+      line-height: 1.45;
+      text-decoration: none;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .toc a .num {
+      font: 700 11px var(--mono);
+      color: var(--muted);
+      min-width: 18px;
+    }
+    .toc a:hover { background: #e1e9f6; color: var(--ink); }
+    .toc a.active {
+      border-left-color: var(--blue);
+      background: var(--blue-soft);
+      color: var(--blue-strong);
+      font-weight: 700;
+    }
+    .toc a.active .num { color: var(--blue); }
+    .side-foot {
+      margin-top: 28px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      font-size: 12px;
+      line-height: 1.65;
+      color: var(--muted);
+    }
+    .side-foot code { font-size: 11px; }
+
+    /* Main content */
+    .main {
+      min-width: 0;
+      background: var(--paper);
+      padding: 0 56px 96px;
+    }
+    .content {
+      max-width: 980px;
+      margin: 0 auto;
+    }
+
+    /* Hero */
+    .hero {
+      padding: 48px 0 36px;
+      border-bottom: 1px solid var(--line);
+    }
+    .scope-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font: 700 12px/1.4 var(--mono);
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+    .badge.teal { background: var(--teal-soft); color: var(--teal); }
+    .badge.amber { background: var(--amber-soft); color: var(--amber); }
+    .hero h1 {
+      margin: 0 0 14px;
+      font-size: clamp(30px, 4.2vw, 46px);
+      line-height: 1.18;
+      letter-spacing: -0.025em;
+    }
+    .hero-lead {
+      max-width: 760px;
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.7;
+      color: var(--sub);
+    }
+
+    /* Chapters */
+    .chapter {
+      padding: 44px 0 48px;
+      border-bottom: 1px solid var(--line);
+      scroll-margin-top: 20px;
+    }
+    .chapter:last-child { border-bottom: 0; }
+    .chapter-kicker {
+      font: 700 12px var(--mono);
+      letter-spacing: 0.08em;
+      color: var(--amber);
+      margin: 0 0 6px;
+      text-transform: uppercase;
+    }
+    .chapter h2 {
+      margin: 0 0 16px;
+      font-size: 27px;
+      line-height: 1.3;
+      letter-spacing: -0.015em;
+    }
+    .chapter h3 {
+      margin: 30px 0 10px;
+      font-size: 19px;
+      line-height: 1.4;
+      scroll-margin-top: 20px;
+    }
+    .chapter h4 {
+      margin: 20px 0 8px;
+      font-size: 16px;
+      line-height: 1.45;
+    }
+    .chapter p {
+      margin: 0 0 14px;
+      max-width: 820px;
+    }
+    .lead {
+      font-size: 17px;
+      color: #2f435e;
+    }
+    .muted {
+      color: var(--sub);
+      font-size: 14px;
+    }
+    ul, ol { margin: 0 0 16px; padding-left: 1.4em; }
+    li + li { margin-top: 6px; }
+
+    /* Callouts */
+    .callout {
+      margin: 20px 0;
+      padding: 15px 18px;
+      border-left: 4px solid var(--blue);
+      border-radius: 0 8px 8px 0;
+      background: var(--blue-soft);
+      font-size: 14.5px;
+    }
+    .callout p { margin: 0; max-width: none; }
+    .callout p + p { margin-top: 8px; }
+    .callout strong { color: var(--blue-strong); }
+    .callout.teal { border-left-color: var(--teal); background: var(--teal-soft); }
+    .callout.teal strong { color: #094f43; }
+    .callout.amber { border-left-color: var(--amber); background: var(--amber-soft); }
+    .callout.amber strong { color: #8c3d0d; }
+
+    /* 4-step overview cards */
+    .overview-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 22px 0;
+    }
+    .overview-card {
+      padding: 15px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+    .overview-card .step-tag {
+      display: inline-block;
+      font: 700 11.5px var(--mono);
+      color: var(--amber);
+      margin-bottom: 6px;
+    }
+    .overview-card h3 {
+      margin: 0 0 6px;
+      font-size: 15.5px;
+    }
+    .overview-card p {
+      margin: 0;
+      font-size: 13.5px;
+      line-height: 1.55;
+      color: var(--sub);
+    }
+
+    /* 3 PID Boundary Cards */
+    .pid-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin: 20px 0;
+    }
+    .pid-card {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--paper);
+    }
+    .pid-head {
+      padding: 10px 14px;
+      background: #eef3fa;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .pid-head strong { font-size: 14.5px; }
+    .pid-pill {
+      font: 700 11px var(--mono);
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--blue);
+      white-space: nowrap;
+    }
+    .pid-card.device .pid-head { background: #edf6f3; }
+    .pid-card.device .pid-pill { color: var(--teal); }
+    .pid-card.app .pid-head { background: #fdf2ea; }
+    .pid-card.app .pid-pill { color: var(--amber); }
+    .pid-body {
+      padding: 13px 14px;
+      font-size: 13.5px;
+      color: var(--sub);
+      display: grid;
+      gap: 8px;
+    }
+    .pid-body p { margin: 0; }
+    .pid-items {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 5px;
+    }
+    .pid-items li {
+      margin: 0;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: #f6f8fc;
+      border: 1px solid var(--line-soft);
+      font-size: 13px;
+      color: var(--ink);
+    }
+
+    /* Interactive Walkthrough Board */
+    .board {
+      margin: 22px 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--paper);
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(22, 35, 56, 0.04);
+    }
+    .board-toolbar {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 12px 16px;
+      background: #f5f8fc;
+      border-bottom: 1px solid var(--line);
+    }
+    .board-toolbar button {
+      min-height: 36px;
+      padding: 4px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      font: 600 13.5px var(--sans);
+      cursor: pointer;
+    }
+    .board-toolbar button:hover:not(:disabled) { border-color: var(--blue); color: var(--blue); }
+    .board-toolbar button:disabled { opacity: 0.45; cursor: default; }
+    .board-toolbar #btn-play {
+      min-width: 76px;
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
+    .board-toolbar #btn-play:hover { background: var(--blue-strong); color: #fff; }
+    .phase-pills {
+      display: flex;
+      gap: 4px;
+      margin-left: 6px;
+    }
+    .phase-pills button {
+      font-size: 12.5px;
+      padding: 4px 9px;
+      color: var(--sub);
+    }
+    .phase-pills button.is-phase {
+      background: var(--blue-soft);
+      border-color: var(--blue);
+      color: var(--blue-strong);
+    }
+    #step-progress {
+      margin-left: auto;
+      font: 600 13px var(--mono);
+      color: var(--sub);
+    }
+    .board-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    }
+    .board-steps {
+      padding: 16px;
+      position: relative;
+    }
+    .board-state {
+      padding: 16px;
+      background: #f8fafd;
+      border-left: 1px solid var(--line);
+    }
+    .board-col-title {
+      margin: 0 0 10px;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--sub);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .step-list {
+      position: relative;
+      list-style: none;
+      margin: 0;
+      padding: 0 0 0 22px;
+    }
+    .step-list::before {
+      content: "";
+      position: absolute;
+      left: 5px;
+      top: 22px;
+      bottom: 22px;
+      border-left: 2px solid #b5c6dc;
+    }
+    .step-list li { position: relative; margin: 0 0 7px; }
+    .step-list > li:nth-last-child(2) { margin-bottom: 0; }
+    .step-btn {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      font-family: var(--sans);
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .step-btn:hover { border-color: #9cb5d8; background: #fbfdff; }
+    .step-btn[aria-current="step"] {
+      background: var(--blue-soft);
+      border-color: var(--blue);
+    }
+    .step-btn b { display: block; font-size: 13.5px; line-height: 1.35; }
+    .step-btn .subline {
+      display: block;
+      margin-top: 2px;
+      font: 12px/1.4 var(--mono);
+      color: var(--sub);
+      overflow-wrap: anywhere;
+    }
+    .step-token {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 12px;
+      height: 12px;
+      margin: 0;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 0 3px #cde0ff;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .step-token.moving { transition: transform 0.45s cubic-bezier(0.22, 0.72, 0.24, 1); }
+
+    /* Live process state cards */
+    .proc-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .proc-box.live {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 2px rgba(14, 107, 92, 0.12);
+    }
+    .proc-box-head {
+      padding: 7px 11px;
+      background: #f0f4f9;
+      border-bottom: 1px solid var(--line-soft);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .proc-box.live .proc-box-head {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+    .proc-box dl {
+      margin: 0;
+      padding: 8px 11px;
+      font-size: 12.5px;
+    }
+    .proc-box dl > div {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr);
+      gap: 8px;
+      padding: 4px 0;
+    }
+    .proc-box dl > div + div { border-top: 1px solid var(--line-soft); }
+    .proc-box dt { color: var(--muted); font-weight: 600; }
+    .proc-box dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+    .proc-box dl > div.changed {
+      background: var(--teal-soft);
+      margin: 2px -6px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      border-top: 0;
+    }
+    .proc-box dl > div.changed dd { color: var(--teal); font-weight: 700; }
+    .wire-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .wire-link.live { color: var(--blue); font-weight: 700; }
+    .wire-link .arrow { font-size: 15px; line-height: 1; }
+
+    .board-annotation {
+      padding: 14px 18px;
+      border-top: 1px solid var(--line);
+      background: #fff;
+    }
+    .board-annotation h3 {
+      margin: 0 0 6px;
+      font-size: 16px;
+    }
+    .board-annotation p {
+      margin: 0 0 8px;
+      font-size: 14.5px;
+      color: var(--sub);
+      max-width: none;
+    }
+    .board-code {
+      margin: 0;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: #edf3fc;
+      color: #163259;
+      font: 13px/1.55 var(--mono);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .board-refs {
+      margin-top: 8px;
+      font-size: 13px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 14px;
+    }
+
+    /* Repo & Project Grids */
+    .card-grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin: 18px 0;
+    }
+    .info-card {
+      display: flex;
+      flex-direction: column;
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fbfcfe;
+    }
+    .info-card h3, .info-card h4 {
+      margin: 0 0 6px;
+      font-size: 16px;
+    }
+    .info-card .meta-line {
+      margin: 0 0 10px;
+      font-size: 13.5px;
+      color: var(--sub);
+    }
+    .info-card p {
+      margin: 0 0 10px;
+      font-size: 14px;
+      color: var(--sub);
+    }
+    .output-list {
+      margin: 4px 0 12px;
+      font-size: 13.5px;
+    }
+    .output-list > div {
+      padding: 8px 0;
+      border-top: 1px solid var(--line-soft);
+    }
+    .output-list dt { font-weight: 700; color: var(--ink); }
+    .output-list dd { margin: 3px 0 0; color: var(--sub); }
+    .tag-muted {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: #e9eff7;
+      color: var(--sub);
+      font-size: 11.5px;
+      font-weight: 600;
+    }
+    .card-links {
+      margin-top: auto;
+      padding-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 12px;
+      font-size: 13px;
+    }
+
+    /* Tables */
+    .table-wrap {
+      margin: 20px 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: auto;
+      background: var(--paper);
+    }
+    table.data {
+      width: 100%;
+      min-width: 680px;
+      border-collapse: collapse;
+      font-size: 13.5px;
+      text-align: left;
+    }
+    table.data th, table.data td {
+      padding: 11px 13px;
+      border-bottom: 1px solid var(--line-soft);
+      vertical-align: top;
+    }
+    table.data thead th {
+      background: #eef3fa;
+      color: var(--ink);
+      font-weight: 700;
+      border-bottom: 1px solid var(--line);
+    }
+    table.data tbody th {
+      font-weight: 700;
+      color: var(--ink);
+      white-space: nowrap;
+    }
+    table.data tbody tr:last-child th,
+    table.data tbody tr:last-child td { border-bottom: 0; }
+    table.data tbody tr:hover { background: #f9fbfe; }
+
+    /* Pure CSS Sequence Diagram */
+    .timing {
+      margin: 22px 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--paper);
+      overflow: hidden;
+    }
+    .timing figcaption {
+      padding: 12px 16px;
+      background: #eef3fa;
+      border-bottom: 1px solid var(--line);
+      font-weight: 700;
+      font-size: 14.5px;
+    }
+    .timing-scroll { overflow-x: auto; }
+    .lifelines { min-width: 720px; padding: 14px 12px 12px; }
+    .lane-row {
+      display: grid;
+      grid-template-columns: repeat(var(--lanes), minmax(0, 1fr));
+      min-height: 54px;
+      text-align: center;
+    }
+    .lane-head { min-height: 0; margin-bottom: 6px; }
+    .lane-head span {
+      padding: 8px 6px;
+      margin: 0 3px;
+      border-radius: 6px;
+      background: #edf2fa;
+      border: 1px solid var(--line);
+      font-weight: 700;
+      font-size: 13px;
+      line-height: 1.3;
+    }
+    .lane-row i {
+      grid-row: 1;
+      background: linear-gradient(var(--line), var(--line)) center/1px 100% no-repeat;
+    }
+    .lane-divider {
+      grid-column: 1 / -1;
+      align-self: center;
+      margin: 6px 0;
+      padding: 4px 10px;
+      border-radius: 4px;
+      background: #f3f6fb;
+      border: 1px dashed #c4d3e6;
+      font: 700 12px var(--mono);
+      color: var(--sub);
+      text-align: left;
+    }
+    .msg {
+      grid-row: 1;
+      position: relative;
+      align-self: center;
+      padding: 0 10px 8px;
+      font-size: 12.5px;
+      line-height: 1.35;
+      color: var(--ink);
+    }
+    .msg::before {
+      content: "";
+      position: absolute;
+      bottom: 0;
+      left: var(--edge);
+      right: var(--edge);
+      border-bottom: 2px solid var(--blue);
+    }
+    .msg::after {
+      content: "";
+      position: absolute;
+      bottom: -4px;
+      border: 5px solid transparent;
+    }
+    .msg.forward::after { right: var(--edge); border-left-color: var(--blue); border-right: 0; }
+    .msg.back::before { border-bottom-style: dashed; border-bottom-color: var(--teal); }
+    .msg.back::after { left: var(--edge); border-right-color: var(--teal); border-left: 0; }
+    .timing-foot {
+      margin: 0;
+      padding: 10px 16px;
+      border-top: 1px solid var(--line);
+      background: #fafcfe;
+      font-size: 13.5px;
+      color: var(--sub);
+    }
+
+    /* IDE-style Source Cards */
+    .source-card {
+      margin: 18px 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--paper);
+    }
+    .source-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 6px 14px;
+      padding: 9px 16px;
+      background: #ebf1f8;
+      border-bottom: 1px solid var(--line);
+    }
+    .source-bar strong { font-size: 14px; }
+    .source-bar .ranges { font-size: 13px; font-weight: 600; display: flex; flex-wrap: wrap; gap: 6px 12px; }
+    .source-meta {
+      padding: 7px 16px;
+      background: #f8fafd;
+      border-bottom: 1px solid var(--line-soft);
+      font-size: 13px;
+      color: var(--sub);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 16px;
+    }
+    .source-body {
+      padding: 14px 16px;
+      font-size: 14.5px;
+    }
+    .source-body p { margin: 0 0 10px; max-width: none; }
+    .source-body p:last-child { margin-bottom: 0; }
+    .seam-flow {
+      margin: 10px 0 0;
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      font: 13px/1.65 var(--mono);
+      overflow-x: auto;
+    }
+    .seam-flow .hl { color: #8ad4ff; font-weight: 700; }
+    .seam-flow .dim { color: #8da2be; }
+
+    /* Code Blocks with Copy */
+    .codeblock {
+      margin: 18px 0;
+      border: 1px solid #203754;
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--code-bg);
+      color: var(--code-ink);
+    }
+    .code-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 14px;
+      background: var(--code-bar);
+      border-bottom: 1px solid #284160;
+      font: 12.5px var(--mono);
+      color: #a9c4e4;
+    }
+    .copy-btn {
+      padding: 3px 10px;
+      border: 1px solid #3c597e;
+      border-radius: 5px;
+      background: #223855;
+      color: #dceafa;
+      font: 600 12px var(--sans);
+      cursor: pointer;
+    }
+    .copy-btn:hover { background: #2c496d; }
+    .codeblock pre {
+      margin: 0;
+      padding: 16px 18px;
+      overflow-x: auto;
+      font-size: 13.5px;
+      line-height: 1.7;
+    }
+    .codeblock pre::selection, .codeblock pre *::selection {
+      background: #9ac5ff;
+      color: #0e1c30;
+    }
+    .c-note {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 8px;
+      align-items: baseline;
+      margin: 6px 0 3px;
+      padding: 4px 8px;
+      border-left: 2px solid #5c8ec8;
+      border-radius: 0 4px 4px 0;
+      background: #1a2d45;
+      color: #cfe4fa;
+      font: 12.5px/1.55 var(--sans);
+      white-space: normal;
+    }
+    .c-note-tag {
+      padding: 0 5px;
+      border-radius: 3px;
+      background: #2b496e;
+      color: #e6f2ff;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    /* Principle Cards */
+    .principle-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin: 18px 0;
+    }
+    .p-card {
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fbfcfe;
+    }
+    .p-card h4 { margin: 0 0 8px; font-size: 15.5px; color: var(--blue-strong); }
+    .p-card p { margin: 0 0 8px; font-size: 14px; color: var(--sub); }
+    .p-card p:last-child { margin-bottom: 0; }
+    .p-card ol { margin: 6px 0 0; padding-left: 1.3em; font-size: 13.5px; color: var(--sub); }
+
+    /* Before / After Model */
+    .model-pair {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin: 18px 0;
+    }
+    .model-box {
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fbfcfe;
+    }
+    .model-box.after {
+      border-color: #d7a68a;
+      background: #fffaf6;
+    }
+    .model-box h4 { margin: 0 0 12px; font-size: 15px; }
+    .model-box dl { margin: 0; display: grid; gap: 8px; font-size: 13.5px; }
+    .model-box dl > div {
+      display: grid;
+      grid-template-columns: 118px minmax(0, 1fr);
+      gap: 10px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line-soft);
+    }
+    .model-box dt { color: var(--muted); font-family: var(--mono); font-size: 12.5px; }
+    .model-box dd { margin: 0; font-weight: 600; color: var(--ink); }
+    .model-box.after dd.hl { color: var(--amber); }
+
+    /* Source index */
+    .index-box {
+      padding: 20px 22px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f7f9fd;
+    }
+    .index-group + .index-group {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+    .index-group h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+      color: var(--blue-strong);
+    }
+    .index-list {
+      margin: 0;
+      padding-left: 1.2em;
+      font-size: 13.5px;
+    }
+    .index-list li { padding: 3px 0; }
+    .footer-note {
+      margin-top: 36px;
+      padding-top: 20px;
+      border-top: 1px solid var(--line);
+      font-size: 13px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    /* Responsive */
+    @media (max-width: 1080px) {
+      .shell { grid-template-columns: 200px minmax(0, 1fr); }
+      .main { padding: 0 32px 72px; }
+      .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .pid-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 820px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+      .side-inner { position: static; max-height: none; padding: 16px 20px; }
+      .brand { margin-bottom: 10px; }
+      .side-title, .side-foot { display: none; }
+      .toc { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 4px; }
+      .toc a {
+        white-space: nowrap;
+        border-left: 0;
+        border-bottom: 3px solid transparent;
+        border-radius: 5px 5px 0 0;
+        padding: 6px 10px;
+      }
+      .toc a.active { border-bottom-color: var(--blue); }
+      .main { padding: 0 20px 60px; }
+      .board-grid, .card-grid-2, .principle-grid, .model-pair { grid-template-columns: 1fr; }
+      .board-state { border-left: 0; border-top: 1px solid var(--line); }
+    }
+    @media (max-width: 520px) {
+      .overview-grid { grid-template-columns: 1fr; }
+      #step-progress { margin-left: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .step-token.moving { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" aria-label="文章目录">
+      <div class="side-inner">
+        <div class="brand">ANDROID SECURITY / FIELD NOTES</div>
+        <div class="side-title">本页目录</div>
+        <nav class="toc" id="toc">
+          <a href="#overview" class="active"><span class="num">01</span>一分钟看懂全局</a>
+          <a href="#walkthrough"><span class="num">02</span>端到端步进演示</a>
+          <a href="#repo-build"><span class="num">03</span>仓库与构建产物</a>
+          <a href="#trace"><span class="num">04</span>跨进程源码链路</a>
+          <a href="#demo"><span class="num">05</span>最小实战 Demo</a>
+          <a href="#principle"><span class="num">06</span>底层原理与对比</a>
+          <a href="#sources"><span class="num">07</span>源码索引</a>
+        </nav>
+        <div class="side-foot">
+          调用链锚点：<code>Frida 16.4.7</code> · <code>frida-tools 12.5.0</code><br>
+          主仓库结构：<code>frida/frida @ a93582c</code><br>
+          另注 <code>Frida 17+</code> Java Bridge 拆包变化。
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="content">
+        <header class="hero">
+          <div class="scope-row">
+            <span class="badge">Windows CLI ↔ Android ART</span>
+            <span class="badge teal">调用链基准：Frida 16.4.7 / frida-tools 12.5.0</span>
+            <span class="badge amber">附 Frida 17+ 演进对照</span>
+          </div>
+          <h1>Frida Android 源码与工作原理导读</h1>
+          <p class="hero-lead">从敲下 <code>frida -U -N com.example.demo -l hook.js</code> 开始，沿着<strong>电脑命令进程 → Android 服务端进程 → 目标 App 进程</strong>三条 PID 边界，拆解 Frida 的源码组织、静态链接与动态注入产物、跨机通信协议，以及 Java Bridge 如何在运行时接管 ART 方法。</p>
+        </header>
+
+        <!-- 01 OVERVIEW -->
+        <section id="overview" class="chapter">
+          <p class="chapter-kicker">01 / Mental Model</p>
+          <h2>一分钟看懂全局：先按 PID 划清边界</h2>
+          <p class="lead">初读 Frida 源码最容易迷失在十几个子仓库和产物名里：<code>frida-core</code>、<code>frida-gum</code>、<code>GumJS</code>、<code>_frida.pyd</code>、<code>frida-server</code>、<code>agent.so</code> 到底谁调用谁？<strong>最不容易乱的方法不是背仓库，而是先看它们各自活在哪个进程（PID）里。</strong></p>
+
+          <div class="overview-grid">
+            <article class="overview-card">
+              <span class="step-tag">STAGE 01</span>
+              <h3>电脑发令</h3>
+              <p>Python CLI 读取 <code>hook.js</code>，经 <code>_frida.pyd</code> 调入静态链接的电脑端 Core。</p>
+            </article>
+            <article class="overview-card">
+              <span class="step-tag">STAGE 02</span>
+              <h3>跨机建连</h3>
+              <p>电脑端 Core 复用 ADB 通道建立 D-Bus 连接，向手机上的 <code>frida-server</code> 查询并附加目标 PID。</p>
+            </article>
+            <article class="overview-card">
+              <span class="step-tag">STAGE 03</span>
+              <h3>注入落点</h3>
+              <p><code>frida-server</code> 按需将 <code>frida-agent.so</code> 注入目标 App 进程，随后把 JS 源码送入 App。</p>
+            </article>
+            <article class="overview-card">
+              <span class="step-tag">STAGE 04</span>
+              <h3>进程内接管</h3>
+              <p>GumJS 运行脚本，Java Bridge 改写 ART 方法入口；触发回调后日志原路回传终端。</p>
+            </article>
+          </div>
+
+          <div class="pid-grid" aria-label="三个独立进程边界">
+            <article class="pid-card">
+              <div class="pid-head">
+                <strong>进程 A：电脑端 <code>frida</code></strong>
+                <span class="pid-pill">Windows PID</span>
+              </div>
+              <div class="pid-body">
+                <p>敲下命令后启动的普通 Python 进程，所有前端解析和客户端通信都在这里完成。</p>
+                <ul class="pid-items">
+                  <li><strong>Frida CLI</strong>（<code>frida-tools</code>）：解析参数、读入脚本、打印日志</li>
+                  <li><strong>Python 绑定</strong>（<code>frida-python</code> + <code>_frida.pyd</code>）：Python 到 C 的桥</li>
+                  <li><strong>电脑端 Core</strong>（静态链接进 <code>_frida.pyd</code>）：管理 USB/ADB 与会话</li>
+                </ul>
+              </div>
+            </article>
+
+            <article class="pid-card device">
+              <div class="pid-head">
+                <strong>进程 B：手机端 <code>frida-server</code></strong>
+                <span class="pid-pill">Android 独立 PID</span>
+              </div>
+              <div class="pid-body">
+                <p>以高权限常驻 Android 的原生 ELF 程序，充当电脑和目标 App 之间的“总控与注入器”。</p>
+                <ul class="pid-items">
+                  <li><strong>ControlService</strong>：在 D-Bus 上接收枚举应用、附加进程等指令</li>
+                  <li><strong>设备端 Core / HostSession</strong>：匹配包名与 PID，调度会话</li>
+                  <li><strong>Linux/Android 后端</strong>：注入 <code>agent.so</code> 并与其建立控制通道</li>
+                </ul>
+              </div>
+            </article>
+
+            <article class="pid-card app">
+              <div class="pid-head">
+                <strong>进程 C：目标 Android App</strong>
+                <span class="pid-pill">App 原有 PID</span>
+              </div>
+              <div class="pid-body">
+                <p>被分析的应用进程本身。Hook 生效的真正战场就在这里，无需重启系统或改 APK。</p>
+                <ul class="pid-items">
+                  <li><strong>Frida agent</strong>（<code>.so</code>）：接收脚本源码、管理脚本生命周期与消息回传</li>
+                  <li><strong>Gum &amp; GumJS</strong>（静态链接进 agent）：JS 引擎 + 原生插桩能力</li>
+                  <li><strong>Java Bridge + ART</strong>：定位 Java 方法并把调用转进 JS 回调</li>
+                </ul>
+              </div>
+            </article>
+          </div>
+
+          <div class="callout amber">
+            <p><strong>版本口径说明：</strong>本文的端到端源码行号、链接方式（如 Core 静态链接进 <code>_frida.pyd</code>、Gum/GumJS 静态链接进 <code>agent.so</code>、GumJS 通过 <code>runtime/java.js</code> 加载 Java Bridge）统一固定在 <strong>Frida 16.4.7 + frida-tools 12.5.0</strong>。主仓库目录结构对照 <code>frida/frida @ a93582c</code>；凡涉及 <strong>Frida 17.0+</strong> 将 Java Bridge 拆分为独立包的改动，均会在文中明确标注，避免跨版本混淆。</p>
+          </div>
+        </section>
+
+        <!-- 02 INTERACTIVE WALKTHROUGH -->
+        <section id="walkthrough" class="chapter">
+          <p class="chapter-kicker">02 / Interactive Walkthrough</p>
+          <h2>端到端步进演示：一次 Hook 如何贯穿三个进程</h2>
+          <p class="lead">点击<strong>播放</strong>或直接点左侧任意步骤，观察控制流光点如何跨过电脑、ADB 通道、<code>frida-server</code> 和目标 App，同时看右侧三个进程内部的状态变化。</p>
+
+          <section class="board" aria-label="Frida Android 端到端流程交互演示">
+            <div class="board-toolbar">
+              <button type="button" id="btn-play">播放</button>
+              <button type="button" id="btn-prev">上一步</button>
+              <button type="button" id="btn-next">下一步</button>
+              <button type="button" id="btn-reset">重置</button>
+              <div class="phase-pills" role="group" aria-label="快速跳转阶段">
+                <button type="button" data-jump="0" class="is-phase">建连与注入 (1–5)</button>
+                <button type="button" data-jump="5">装载与触发 (6–8)</button>
+              </div>
+              <output id="step-progress" aria-live="polite">第 1 / 8 步</output>
+            </div>
+
+            <div class="board-grid">
+              <div class="board-steps">
+                <h3 class="board-col-title">控制流（点击可直达）</h3>
+                <ol class="step-list" id="step-list">
+                  <li><button type="button" class="step-btn" aria-current="step"><b>1. 电脑启动 CLI 并解析命令</b><span class="subline">frida -U -N com.example.demo -l hook.js</span></button></li>
+                  <li><button type="button" class="step-btn"><b>2. Python 经原生扩展调入电脑端 Core</b><span class="subline">core.py → _frida.pyd → frida_device_attach_sync()</span></button></li>
+                  <li><button type="button" class="step-btn"><b>3. 经 ADB 通道与手机建立 D-Bus 会话</b><span class="subline">droidy-host-session.vala → ADB → D-Bus</span></button></li>
+                  <li><button type="button" class="step-btn"><b>4. frida-server 定位 PID 并触发附加</b><span class="subline">ControlService → linux-host-session::perform_attach_to()</span></button></li>
+                  <li><button type="button" class="step-btn"><b>5. 将 frida-agent.so 注入目标 App 进程</b><span class="subline">ptrace / 注入器装载 agent.so → 建立控制通道</span></button></li>
+                  <li><button type="button" class="step-btn"><b>6. 发送 hook.js 并交由 GumJS 执行</b><span class="subline">agent.vala → script-engine.vala → QuickJS / V8</span></button></li>
+                  <li><button type="button" class="step-btn"><b>7. Java Bridge 在 ART 上安装方法 Hook</b><span class="subline">Java.perform() → ArtMethodMangler 改写 onResume</span></button></li>
+                  <li><button type="button" class="step-btn"><b>8. App 触发 onResume() 并回传日志</b><span class="subline">ART → JS 回调 → console.js → 终端显示 onResume called</span></button></li>
+                  <li class="step-token" id="step-token" aria-hidden="true" hidden></li>
+                </ol>
+              </div>
+
+              <aside class="board-state" aria-label="三个进程的实时状态">
+                <h3 class="board-col-title">三进程实时状态</h3>
+
+                <div class="proc-box" id="box-host">
+                  <div class="proc-box-head"><span>电脑 · <code>frida</code> 进程</span><span id="host-badge">CLI 就绪</span></div>
+                  <dl>
+                    <div id="st-cli"><dt>CLI / 绑定</dt><dd></dd></div>
+                    <div id="st-terminal"><dt>终端输出</dt><dd></dd></div>
+                  </dl>
+                </div>
+
+                <div class="wire-link" id="wire-adb"><span class="arrow">↕</span><span id="wire-adb-text">ADB / D-Bus 通道：尚未建立</span></div>
+
+                <div class="proc-box" id="box-server">
+                  <div class="proc-box-head"><span>Android · <code>frida-server</code></span><span id="server-badge">监听中</span></div>
+                  <dl>
+                    <div id="st-server"><dt>HostSession</dt><dd></dd></div>
+                  </dl>
+                </div>
+
+                <div class="wire-link" id="wire-agent"><span class="arrow">↓</span><span id="wire-agent-text">进程注入与控制通道：待附加</span></div>
+
+                <div class="proc-box" id="box-app">
+                  <div class="proc-box-head"><span>Android · 目标 App PID</span><span id="app-badge">正常运行</span></div>
+                  <dl>
+                    <div id="st-agent"><dt>agent / GumJS</dt><dd></dd></div>
+                    <div id="st-art"><dt>ART / onResume</dt><dd></dd></div>
+                  </dl>
+                </div>
+              </aside>
+            </div>
+
+            <div class="board-annotation" aria-live="polite" aria-atomic="true">
+              <h3 id="ann-title"></h3>
+              <p id="ann-text"></p>
+              <pre class="board-code"><code id="ann-code"></code></pre>
+              <div class="board-refs" id="ann-refs"></div>
+            </div>
+          </section>
+        </section>
+
+        <!-- 03 REPO & BUILD -->
+        <section id="repo-build" class="chapter">
+          <p class="chapter-kicker">03 / Repository &amp; Build</p>
+          <h2>仓库结构、构建语言与最终产物</h2>
+          <p class="lead"><code>frida/frida</code> 顶层仓库本身并不存放全部业务代码，它是一个<strong>总控构建与发布编排仓库</strong>：用 <code>.gitmodules</code> 锁定各个子仓库的精确提交，再用 <strong>Meson</strong> 统一串联编译和打包。</p>
+
+          <h3>顶层仓库怎么组织代码</h3>
+          <div class="card-grid-2">
+            <article class="info-card">
+              <h4><code>subprojects/</code> · 核心子项目</h4>
+              <p>存放各独立源码子模块。Windows 到 Android 这条 Hook 链路主要经过 <code>frida-tools</code>、<code>frida-python</code>、<code>frida-core</code> 和 <code>frida-gum</code> 四个仓库。</p>
+              <div class="card-links">
+                <a href="https://github.com/frida/frida/tree/a93582c832d74de1eaa0ec59994365f6981368db">主仓库 · a93582c</a>
+                <a href="https://github.com/frida/frida/tree/a93582c832d74de1eaa0ec59994365f6981368db/subprojects">subprojects/</a>
+                <a href="https://github.com/frida/frida/blob/a93582c832d74de1eaa0ec59994365f6981368db/.gitmodules">.gitmodules</a>
+              </div>
+            </article>
+            <article class="info-card">
+              <h4><code>releng/</code> 与 <code>tools/</code> · 构建基础设施</h4>
+              <p><code>releng</code>（作为子模块固定在特定提交，如 <code>a5250c7</code>）提供跨平台工具链配置与打包脚本；<code>tools/ensure-submodules.py</code> 自动补齐尚未检出的子模块。</p>
+              <div class="card-links">
+                <a href="https://github.com/frida/releng/tree/a5250c7ee39ee20a0169c256f4a33e5a8d027d5c">releng</a>
+                <a href="https://github.com/frida/frida/blob/a93582c832d74de1eaa0ec59994365f6981368db/tools/ensure-submodules.py">ensure-submodules.py</a>
+              </div>
+            </article>
+            <article class="info-card">
+              <h4>构建入口与配置</h4>
+              <p><code>configure</code> / <code>configure.bat</code> 和平台 <code>make</code> 包装器负责初始化构建目录；<code>meson.build</code> 组织依赖图，<code>meson.options</code> 声明编译开关（如 JS 引擎、组件裁剪）。</p>
+              <div class="card-links">
+                <a href="https://github.com/frida/frida/blob/a93582c832d74de1eaa0ec59994365f6981368db/configure.bat">configure.bat</a>
+                <a href="https://github.com/frida/frida/blob/a93582c832d74de1eaa0ec59994365f6981368db/meson.build">meson.build</a>
+                <a href="https://github.com/frida/frida/blob/a93582c832d74de1eaa0ec59994365f6981368db/meson.options">meson.options</a>
+              </div>
+            </article>
+            <article class="info-card">
+              <h4>CI 与社区文档</h4>
+              <p><code>.github/</code> 与 <code>.cirrus.yml</code> 定义多平台自动化编译发布流水线；<code>README.md</code>、<code>CONTRIBUTING.md</code>、<code>COPYING</code> 说明使用、贡献与许可协议。</p>
+              <div class="card-links">
+                <a href="https://github.com/frida/frida/tree/a93582c832d74de1eaa0ec59994365f6981368db/.github">.github/</a>
+                <a href="https://github.com/frida/frida/blob/a93582c832d74de1eaa0ec59994365f6981368db/.cirrus.yml">.cirrus.yml</a>
+              </div>
+            </article>
+          </div>
+
+          <h3>四个核心子项目：语言、产物与「静态链接」去向</h3>
+          <div class="callout teal">
+            <p><strong>先解一个常见疑惑：</strong>为什么在电脑上找不到单独的 <code>libfrida-core.dll</code>，在手机 App 里也看不到单独的 <code>libfrida-gum.so</code>？因为在 <strong>16.4.7 默认构建</strong>中，<strong>Core 被静态链接进了电脑端的 <code>_frida.pyd</code> 和手机端的 <code>frida-server</code>，而 Gum 与 GumJS 则被静态链接进了 <code>frida-agent.so</code></strong>。理解了“构建期合并、运行期分进程加载”，架构图就彻底通了。</p>
+          </div>
+
+          <div class="card-grid-2">
+            <article class="info-card">
+              <h4><code>frida-core</code></h4>
+              <p class="meta-line"><strong>语言：</strong>Vala 为主（先转译成 C 再编译为原生代码），辅以 C/C++ 与平台注入代码。</p>
+              <dl class="output-list">
+                <div>
+                  <dt>Core 原生库</dt>
+                  <dd>双端复用：电脑端静态链接进 <code>_frida.pyd</code> 发起连接与会话管理；手机端编进 <code>frida-server</code> 响应请求。</dd>
+                </div>
+                <div>
+                  <dt><code>frida-server</code>（Android ELF）</dt>
+                  <dd>独立进程运行在 Android 上，负责枚举应用、按 PID 附加并装载 agent。</dd>
+                </div>
+                <div>
+                  <dt><code>frida-agent.so</code>（共享库）</dt>
+                  <dd>被按需注入目标 App 进程，内含静态链接的 Gum/GumJS，管理脚本加载、卸载与消息通信。</dd>
+                </div>
+                <div>
+                  <dt><code>frida-gadget.so</code> <span class="tag-muted">本 Demo 未用</span></dt>
+                  <dd>直接打包进自有测试 App，由应用自行加载初始化，无需独立运行 <code>frida-server</code>。</dd>
+                </div>
+              </dl>
+              <div class="card-links">
+                <a href="https://github.com/frida/frida-core/blob/1c41f2396787436d207e8b2f21569316f7a06f38/meson.build">meson.build</a>
+                <a href="https://frida.re/docs/gadget/">Gadget 文档</a>
+              </div>
+            </article>
+
+            <article class="info-card">
+              <h4><code>frida-gum</code></h4>
+              <p class="meta-line"><strong>语言：</strong>C / C++；脚本引擎支持 QuickJS 或 V8。</p>
+              <dl class="output-list">
+                <div>
+                  <dt>Gum 原生插桩库</dt>
+                  <dd>提供底层 <code>Interceptor</code>（函数拦截）、<code>Stalker</code>（指令跟踪）、内存读写与模块/符号查询能力。</dd>
+                </div>
+                <div>
+                  <dt>GumJS 脚本绑定库</dt>
+                  <dd>把 Gum 的 C 能力暴露给 JS 引擎，执行用户的 <code>hook.js</code>，并将 <code>console.log</code> / <code>send()</code> 编成消息交回 agent。</dd>
+                </div>
+              </dl>
+              <div class="card-links">
+                <a href="https://github.com/frida/frida-gum/blob/45e176dbafaccaa351d09b1836a8a8e16981113c/bindings/gumjs/meson.build">bindings/gumjs/meson.build</a>
+              </div>
+            </article>
+
+            <article class="info-card">
+              <h4><code>frida-tools</code></h4>
+              <p class="meta-line"><strong>语言：</strong>Python（部分工具附带内置 JS 辅助脚本）。</p>
+              <dl class="output-list">
+                <div>
+                  <dt>命令行套件</dt>
+                  <dd>提供 <code>frida</code>、<code>frida-ps</code>、<code>frida-trace</code> 等终端命令。负责解析 CLI 参数、读取脚本文件并打印回传日志。</dd>
+                </div>
+                <div>
+                  <dt>内置辅助 JS</dt>
+                  <dd>如交互 REPL 或 trace 模板，由 CLI 发送到 App 内的 GumJS 执行。</dd>
+                </div>
+              </dl>
+              <div class="card-links">
+                <a href="https://github.com/frida/frida-tools/blob/8c0338e8e16205f53e89ecc64e5c36211e1b3f08/pyproject.toml">pyproject.toml</a>
+              </div>
+            </article>
+
+            <article class="info-card">
+              <h4><code>frida-python</code></h4>
+              <p class="meta-line"><strong>语言：</strong>Python 包装层 + CPython C 扩展。</p>
+              <dl class="output-list">
+                <div>
+                  <dt><code>frida</code> Python 包</dt>
+                  <dd>暴露 <code>Device</code>、<code>Session</code>、<code>Script</code> 等高层面向对象 API，CLI 和用户自写 Python 脚本都走这里。</dd>
+                </div>
+                <div>
+                  <dt><code>_frida.pyd</code>（Windows 原生扩展）</dt>
+                  <dd>本质是 CPython 可直接 <code>import</code> 的 DLL，把 Python 方法转发给静态链接在内的 Core C 函数，并将异步事件回调回 Python。</dd>
+                </div>
+              </dl>
+              <div class="card-links">
+                <a href="https://github.com/frida/frida-python/blob/7b56f289054bd0aea0d9fbe32cd7a04a2fb43617/frida/meson.build">frida/meson.build</a>
+              </div>
+            </article>
+          </div>
+
+          <h3>全部组件对照表（语言 · 产物 · 归属进程 · 职责）</h3>
+          <div class="table-wrap">
+            <table class="data" aria-label="Frida 各组件的语言、构建产物、运行进程和职责">
+              <thead>
+                <tr>
+                  <th scope="col">组件</th>
+                  <th scope="col">主要语言</th>
+                  <th scope="col">构建 / 分发产物</th>
+                  <th scope="col">运行在哪一个进程</th>
+                  <th scope="col">运行时职责</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Frida CLI</th>
+                  <td>Python</td>
+                  <td><code>frida-tools</code> 包与 <code>frida</code> 命令入口</td>
+                  <td>电脑命令行进程</td>
+                  <td>解析参数、按包名找 PID、读取 <code>hook.js</code>、展示回传日志</td>
+                </tr>
+                <tr>
+                  <th scope="row">Python 绑定</th>
+                  <td>Python + C 扩展</td>
+                  <td><code>frida</code> 包 + Windows <code>_frida.pyd</code></td>
+                  <td>电脑命令行 / 脚本进程</td>
+                  <td>将 Python 调用桥接到 Core 原生函数，接收事件回调</td>
+                </tr>
+                <tr>
+                  <th scope="row">Frida Core</th>
+                  <td>Vala、C/C++</td>
+                  <td>原生静态/内部库（链接进 <code>_frida.pyd</code> 与 <code>frida-server</code>）</td>
+                  <td>电脑进程 &amp; <code>frida-server</code></td>
+                  <td>电脑端管理设备与会话；手机端枚举应用并调度附加与注入</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>frida-server</code></th>
+                  <td>Vala（调用 Core）</td>
+                  <td>Android 架构对应的原生 ELF 可执行文件</td>
+                  <td>Android 独立 PID</td>
+                  <td>监听请求、枚举进程、执行注入并在电脑与 agent 间中继会话</td>
+                </tr>
+                <tr>
+                  <th scope="row">Frida agent</th>
+                  <td>Vala（链接 Gum/GumJS）</td>
+                  <td>Android 原生共享库（<code>.so</code>）</td>
+                  <td>目标 App 原有 PID</td>
+                  <td>与服务端通信，管理脚本的创建、加载、卸载与消息上报</td>
+                </tr>
+                <tr>
+                  <th scope="row">Gum</th>
+                  <td>C / C++</td>
+                  <td>原生插桩库（16.4.7 默认静态链接进 agent <code>.so</code>）</td>
+                  <td>目标 App 原有 PID</td>
+                  <td>原生函数拦截（Interceptor）、指令跟踪（Stalker）、内存与符号操作</td>
+                </tr>
+                <tr>
+                  <th scope="row">GumJS</th>
+                  <td>C / C++（QuickJS / V8）</td>
+                  <td>脚本运行时绑定（默认静态链接进 agent <code>.so</code>）</td>
+                  <td>目标 App 原有 PID</td>
+                  <td>运行 <code>hook.js</code>，把 Gum 原生能力暴露给 JavaScript</td>
+                </tr>
+                <tr>
+                  <th scope="row">Java Bridge</th>
+                  <td>JavaScript（通过 JNI 调 ART）</td>
+                  <td><strong>16.4.7：</strong>随 GumJS 运行时内置；<br><strong>17.0+：</strong>拆为独立 JS 包（CLI/trace 预装，自定义 agent 按需引入）</td>
+                  <td>目标 App 原有 PID</td>
+                  <td>提供 <code>Java.perform()</code> / <code>Java.use()</code>，在 ART 上安装 Java 方法 Hook</td>
+                </tr>
+                <tr>
+                  <th scope="row">Frida Gadget</th>
+                  <td>Vala + 原生库</td>
+                  <td>可嵌入 App 的 <code>.so</code>（本 Demo 未采用）</td>
+                  <td>加载它的 App PID</td>
+                  <td>免 <code>frida-server</code> 模式，由 App 主动载入并在进程内拉起 Frida</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="muted">除上述直接运行产物外，官方发布页还提供各平台 <code>devkit</code> 静态包供外部 C/C++ 程序直接链接。<a href="https://github.com/frida/frida/releases/tag/16.4.7">Frida 16.4.7 发布产物</a> · <a href="https://frida.re/news/2025/05/17/frida-17-0-0-released/">Frida 17.0.0 Bridge 拆分说明</a></p>
+        </section>
+
+        <!-- 04 SOURCE TRACE -->
+        <section id="trace" class="chapter">
+          <p class="chapter-kicker">04 / End-to-End Source Trace</p>
+          <h2>跨进程源码链路：从命令入口到 ART 方法</h2>
+          <p class="lead">这一节把整条链路按<strong>三道物理边界</strong>拆开讲清楚：每一棒都交代“上一层是谁、参数怎么传过来、本层核心源码在哪、下一棒接给谁”。全部行号均对应 <strong>Frida 16.4.7 + frida-tools 12.5.0</strong>。</p>
+
+          <figure class="timing">
+            <figcaption>端到端时序图 · 从附加进程到触发 onResume() 并回传日志</figcaption>
+            <div class="timing-scroll" role="region" tabindex="0" aria-label="Frida 端到端时序图">
+              <div class="lifelines" style="--lanes: 5">
+                <div class="lane-row lane-head" aria-hidden="true">
+                  <span>CLI &amp; Python 绑定</span>
+                  <span>电脑端 Core</span>
+                  <span>frida-server</span>
+                  <span>App / agent &amp; GumJS</span>
+                  <span>Java Bridge &amp; ART</span>
+                </div>
+
+                <div class="lane-row"><div class="lane-divider">阶段 A · 连接设备、匹配 PID 与注入 agent</div></div>
+
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i><i style="grid-column:5"></i>
+                  <div class="msg forward" style="grid-column:1/3;--edge:25%"><code>device.attach(pid)</code> → <code>_frida.pyd</code></div>
+                </div>
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i><i style="grid-column:5"></i>
+                  <div class="msg forward" style="grid-column:2/4;--edge:25%">经 ADB 通道发 D-Bus 附加请求</div>
+                </div>
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i><i style="grid-column:5"></i>
+                  <div class="msg forward" style="grid-column:3/5;--edge:25%"><code>perform_attach_to()</code> 注入 <code>agent.so</code> 并建控制通道</div>
+                </div>
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i><i style="grid-column:5"></i>
+                  <div class="msg back" style="grid-column:1/4;--edge:16.7%">返回 <code>Session</code> 对象，会话就绪</div>
+                </div>
+
+                <div class="lane-row"><div class="lane-divider">阶段 B · 发送 hook.js 并安装 ART Hook</div></div>
+
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i><i style="grid-column:5"></i>
+                  <div class="msg forward" style="grid-column:1/5;--edge:12.5%">创建并加载脚本：把 <code>hook.js</code> 源码送达 <code>script-engine</code></div>
+                </div>
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i><i style="grid-column:5"></i>
+                  <div class="msg forward" style="grid-column:4/6;--edge:25%">GumJS 执行脚本 → <code>ArtMethodMangler</code> 改写 <code>onResume</code></div>
+                </div>
+
+                <div class="lane-row"><div class="lane-divider">阶段 C · App 触发方法与日志回传</div></div>
+
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i><i style="grid-column:5"></i>
+                  <div class="msg back" style="grid-column:4/6;--edge:25%">App 调用 <code>onResume()</code> → 命中 JS 回调并再调原方法</div>
+                </div>
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i><i style="grid-column:5"></i>
+                  <div class="msg back" style="grid-column:1/5;--edge:12.5%"><code>console.js</code> 编码日志 → 会话回传 → 终端打印 <code>onResume called</code></div>
+                </div>
+              </div>
+            </div>
+            <p class="timing-foot">实线箭头表示控制流下行（发起请求 / 安装 Hook），虚线箭头表示响应或回调事件上行。</p>
+          </figure>
+
+          <h3 id="host-source">第一棒：电脑进程内（CLI → Python 绑定 → 电脑端 Core）</h3>
+          <p>不论你是敲 <code>frida</code> 命令，还是自己写 Python 脚本 <code>import frida</code>，底层走的是完全相同的调用路径：Python 层通过 CPython 原生扩展 <code>_frida.pyd</code> 直接跳入静态链接的 <code>frida-core</code> C API，全程都在电脑同一个进程内完成。</p>
+
+          <article class="source-card">
+            <div class="source-bar">
+              <strong>电脑端附加调用接缝</strong>
+              <span class="ranges">
+                <a href="https://github.com/frida/frida-tools/blob/c1002d27b2c6b7aab39e2c74fbb20a255037f407/setup.py#L61">CLI 入口 L61</a>
+                <a href="https://github.com/frida/frida-tools/blob/c1002d27b2c6b7aab39e2c74fbb20a255037f407/frida_tools/application.py#L613">application.py L613</a>
+                <a href="https://github.com/frida/frida-python/blob/148ca1461d9b01a9643999540fb1fb64a984d355/frida/core.py#L1058">core.py L1058</a>
+                <a href="https://github.com/frida/frida-python/blob/148ca1461d9b01a9643999540fb1fb64a984d355/frida/_frida/extension.c#L2854">extension.c L2854</a>
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/frida.vala#L1099">frida.vala L1099</a>
+              </span>
+            </div>
+            <div class="source-meta">
+              <span><code>frida-tools @ c1002d27</code></span>
+              <span><code>frida-python @ 148ca146</code></span>
+              <span><code>frida-core @ 78ff6e5b</code></span>
+            </div>
+            <div class="source-body">
+              <p><strong>交接过程：</strong><code>frida</code> 命令由 <code>frida_tools.repl:main</code> 启动。<code>application.py</code> 先通过已选设备查询正在运行的应用，用 <code>-N</code> 给出的包名换到 PID，再调用 <code>self._device.attach(pid)</code>。<code>frida/core.py</code> 把请求交给 C 扩展 <code>extension.c</code>，后者调用静态链接在 <code>_frida.pyd</code> 里的原生函数 <code>frida_device_attach_sync()</code>，正式进入 Vala 实现的 <code>Device.attach()</code>。</p>
+              <div class="seam-flow"><span class="dim"># 同一个 Windows Python 进程内</span>
+frida_tools/application.py:<span class="hl">self._device.attach(pid)</span>
+  └─▶ frida/core.py:<span class="hl">Device.attach()</span>
+        └─▶ _frida.pyd (extension.c):<span class="hl">frida_device_attach_sync()</span>
+              └─▶ frida-core (src/frida.vala):<span class="hl">Device.attach()</span> → 交给 Android 客户端后端</div>
+            </div>
+          </article>
+
+          <h3 id="server-source">第二棒：跨机器与手机服务端（ADB → D-Bus → frida-server）</h3>
+          <p><code>Device.attach()</code> 发现目标是一台 USB 连接的 Android 设备后，控制流立刻交给 Android 客户端后端（<code>droidy-host-session.vala</code>），经由 ADB 把请求送进手机上常驻的 <code>frida-server</code> 进程。</p>
+
+          <article class="source-card">
+            <div class="source-bar">
+              <strong>ADB 通道与设备端 Server 接缝</strong>
+              <span class="ranges">
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/droidy/droidy-host-session.vala#L165">打开 ADB 通道 L165</a>
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/droidy/droidy-host-session.vala#L789">Android 附加 L789</a>
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/droidy/droidy-host-session.vala#L897">D-Bus 建连 L897</a>
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/server/server.vala#L201">server.vala L201</a>
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/control-service.vala#L663">control-service L663</a>
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L426">perform_attach_to L426</a>
+              </span>
+            </div>
+            <div class="source-meta">
+              <span><code>frida-core @ 78ff6e5b</code></span>
+              <span>跨机协议：ADB Transport + Frida D-Bus</span>
+            </div>
+            <div class="source-body">
+              <p><strong>交接过程：</strong>电脑端 <code>droidy-host-session.vala</code> 让 ADB 选中目标设备并打开通道，在其上建立 Frida 的 D-Bus 连接。手机上独立运行的 <code>server/server.vala</code> 启动着 <code>ControlService</code>，收到应用枚举和附加请求后转交 <code>HostSession</code>。真正干活的是 <code>linux-host-session.vala</code>：先查询 Android 应用列表（<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L259">L259</a>），再在 <code>perform_attach_to()</code>（L426）里将 <code>frida-agent.so</code> 注入目标 PID，并建立服务端与 agent 之间的控制通道。</p>
+              <div class="seam-flow"><span class="dim"># 跨机器边界：Windows Core ──[ADB / D-Bus]──▶ Android frida-server</span>
+droidy-host-session.vala:<span class="hl">attach()</span>
+  └─▶ (ADB 通道 + D-Bus)
+        └─▶ server.vala / control-service.vala:<span class="hl">分发会话请求</span>
+              └─▶ linux-host-session.vala:<span class="hl">perform_attach_to(pid)</span> → 注入 agent.so</div>
+            </div>
+          </article>
+
+          <h3 id="agent-source">第三棒：目标 App 进程内（agent → GumJS → Java Bridge → ART）</h3>
+          <p><code>frida-agent.so</code> 一旦进入目标 App 的地址空间，真正的脚本运行和 Hook 安装就开始了。记住 App 进程内部清晰的<strong>三层分工</strong>：</p>
+          <ol>
+            <li><strong>agent 管脚本与通道：</strong>接收电脑发来的 <code>hook.js</code>，负责脚本创建、加载、卸载，以及把事件消息送回会话。</li>
+            <li><strong>GumJS 跑 JS 引擎：</strong>由于 16.4.7 默认把 Gum 与 GumJS 静态链接进 agent <code>.so</code>（<a href="https://github.com/frida/releng/blob/f7ba343c9acb19b3b333a8bc5cefd110b550cd9d/meson_configure.py#L90">默认链接配置</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/meson.build#L41">agent 构建定义</a>），agent 直接调用库内 GumJS 运行用户脚本，并把 <code>console.log()</code> 编码成日志消息。</li>
+            <li><strong>Java Bridge 接管 ART：</strong>脚本调用 <code>Java.perform()</code> / <code>Java.use()</code> 时，桥接层通过 JNI 与 ART 内部数据结构交互，完成方法替换。</li>
+          </ol>
+
+          <article class="source-card">
+            <div class="source-bar">
+              <strong>App 进程内从脚本加载到 ART 改写的接缝</strong>
+              <span class="ranges">
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/agent.vala#L767">agent.vala L767</a>
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/payload/script-engine.vala#L87">script-engine L87</a>
+                <a href="https://github.com/frida/frida-gum/blob/4bfc43f0b7f93b6d03d732d221d471d6c6ed7976/bindings/gumjs/runtime/java.js">GumJS java.js</a>
+                <a href="https://github.com/frida/frida-gum/blob/4bfc43f0b7f93b6d03d732d221d471d6c6ed7976/bindings/gumjs/runtime/console.js#L46">console.js L46</a>
+                <a href="https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/index.js#L371">Java.perform L371</a>
+                <a href="https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/lib/class-factory.js#L1720">class-factory L1720</a>
+                <a href="https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/lib/android.js#L3359">ArtMethodMangler L3359</a>
+              </span>
+            </div>
+            <div class="source-meta">
+              <span><code>frida-core @ 78ff6e5b</code></span>
+              <span><code>frida-gum @ 4bfc43f0</code></span>
+              <span><code>frida-java-bridge @ 8d2e7d71</code></span>
+              <span><code>AOSP ART</code></span>
+            </div>
+            <div class="source-body">
+              <p><strong>交接过程：</strong><code>agent.vala</code>（L767）打开 App 内的 agent 会话，收到脚本创建请求后交给 <code>script-engine.vala</code>（L87）通过 Gum 的脚本后端加载源码。16.4.7 中 GumJS 经 <code>runtime/java.js</code> 挂载 Java Bridge，脚本执行 <code>Java.perform()</code>（<code>index.js#L371</code>）后，<code>class-factory.js</code>（L1720）为目标 Java 方法构建包装并拦截 <code>.implementation</code> 赋值，最终由 <code>lib/android.js</code>（L3359）的 <code>ArtMethodMangler</code> 对接 AOSP 的 <a href="https://android.googlesource.com/platform/art/+/refs/heads/main/runtime/art_method.h"><code>ArtMethod</code></a> 完成替换。回调中调用 <code>console.log()</code> 时，由 <code>runtime/console.js</code>（L46）封装为日志消息经原会话传回电脑终端。</p>
+              <div class="seam-flow"><span class="dim"># 目标 App 原有 PID 内</span>
+lib/agent/agent.vala:<span class="hl">打开 agent 会话</span>
+  └─▶ lib/payload/script-engine.vala:<span class="hl">创建并加载 hook.js</span>
+        └─▶ GumJS (QuickJS/V8) + runtime/java.js
+              └─▶ frida-java-bridge:<span class="hl">index.js → class-factory.js → ArtMethodMangler</span>
+                    └─▶ AOSP ART (<span class="hl">ArtMethod</span> / Activity.onResume)</div>
+            </div>
+          </article>
+        </section>
+
+        <!-- 05 MINIMAL DEMO -->
+        <section id="demo" class="chapter">
+          <p class="chapter-kicker">05 / Minimal Practice</p>
+          <h2>最小实战 Demo：Hook <code>Activity.onResume()</code></h2>
+          <p class="lead">用 8 行 JavaScript 观察任意自有测试 App 的界面恢复时机，并对照看看命令行的每一个参数如何触发前面梳理的整条链路。</p>
+
+          <figure class="codeblock">
+            <div class="code-head">
+              <span>hook.js · 运行在目标 App 进程内的 GumJS 引擎中</span>
+              <button type="button" class="copy-btn" data-copy="demo-js">复制脚本</button>
+            </div>
+            <pre><code id="demo-js"><span class="c-note"><span class="c-note-tag">1</span><span>确保当前线程附着到 ART / JavaVM，在安全上下文中操作类加载器与 Java 对象。</span></span>Java.perform(() =&gt; {
+<span class="c-note"><span class="c-note-tag">2</span><span>向 Java Bridge 查找目标类，返回一个可在 JS 里访问方法和字段的包装器。</span></span>  const Activity = Java.use('android.app.Activity');
+<span class="c-note"><span class="c-note-tag">3</span><span>显式选择无参重载的 onResume()，避免同名重载方法产生歧义。</span></span>  const onResume = Activity.onResume.overload();
+<span class="c-note"><span class="c-note-tag">4</span><span>给 .implementation 赋值即触发 ArtMethodMangler 改写 ART 方法入口。</span></span>  onResume.implementation = function () {
+    console.log('onResume called');
+<span class="c-note"><span class="c-note-tag">5</span><span>以当前 Activity 实例 (this) 调用原始 onResume 实现，保持 App 正常生命周期。</span></span>    onResume.call(this);
+  };
+});</code></pre>
+          </figure>
+
+          <figure class="codeblock">
+            <div class="code-head">
+              <span>终端命令 · 在 hook.js 所在目录执行（将包名替换为你的测试 App）</span>
+              <button type="button" class="copy-btn" data-copy="demo-cmd">复制命令</button>
+            </div>
+            <pre><code id="demo-cmd">frida -U -N com.example.demo -l hook.js</code></pre>
+          </figure>
+
+          <h3>这条命令的每一步背后发生了什么？</h3>
+          <ol>
+            <li><strong><code>-U</code>（USB 设备）：</strong>让电脑端 Core 选择通过 USB/ADB 连接的 Android 设备，并通过 ADB 通道与手机上已启动的 <code>frida-server</code> 建立 D-Bus 连接。</li>
+            <li><strong><code>-N com.example.demo</code>（按包名附加已运行 App）：</strong>CLI 先向 <code>frida-server</code> 拉取应用列表，找到 <code>com.example.demo</code> 对应的运行中 PID，再调用 <code>device.attach(pid)</code> 注入 <code>agent.so</code>。<em>（要求 App 提前打开；如果要从冷启动拦截，则改用 <code>-f</code> 让 Frida 负责 spawn 启动并挂起主线程。）</em></li>
+            <li><strong><code>-l hook.js</code>（加载本地脚本）：</strong>CLI 读取电脑磁盘上的 <code>hook.js</code> 文本，经会话送入目标 App 内的 <code>agent</code>，由 GumJS 执行。<code>Java.perform()</code> 回调运行完毕时，<code>Activity.onResume()</code> 的 Hook 就安装好了。</li>
+            <li><strong>切后台再切回前台（触发与回传）：</strong>Android 系统回调 <a href="https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/app/Activity.java"><code>Activity.onResume()</code></a>，执行流先命中 JS 回调打印 <code>onResume called</code>，再通过 <code>onResume.call(this)</code> 走回原方法；GumJS 的 <code>console.js</code> 把日志封装发回电脑端 CLI，最终出现在终端里。</li>
+          </ol>
+        </section>
+
+        <!-- 06 DEEP PRINCIPLE -->
+        <section id="principle" class="chapter">
+          <p class="chapter-kicker">06 / Deep Dive</p>
+          <h2>底层原理拆解：注入、ART 改写、Native 拦截与横向对比</h2>
+          <p class="lead">如果只停留在“<code>.implementation</code> 把入口接到 JS”，很多关键问题依然是黑盒：<code>agent.so</code> 是怎么塞进别人进程的？没有改过 <code>libart.so</code>，Frida 凭什么能改写 Java 方法？它和经典 Xposed 的本质区别又是什么？</p>
+
+          <h3>6.1 注入机制：<code>frida-server</code> 如何把 <code>agent.so</code> 送进目标进程？</h3>
+          <div class="principle-grid">
+            <article class="p-card">
+              <h4>为什么需要独立运行的 <code>frida-server</code>？</h4>
+              <p>Android 应用之间有严格的沙箱和进程隔离。电脑端 CLI 无法直接读写手机 App 的内存，因此需要在设备端运行一个高权限（通常为 root）的 <code>frida-server</code> 进程，由它作为执行者操作目标进程。</p>
+            </article>
+            <article class="p-card">
+              <h4>注入 <code>agent.so</code> 的四个关键动作</h4>
+              <ol>
+                <li><strong>暂停与存现场：</strong>注入器用 <code>ptrace</code> 附加目标进程、暂停执行并备份原寄存器上下文。</li>
+                <li><strong>写入与装载：</strong>在目标进程内分配执行空间，调用系统动态链接器（<code>dlopen</code> 等路径）将 <code>frida-agent.so</code> 映射进目标 PID。</li>
+                <li><strong>恢复原线程：</strong>恢复被暂停线程的寄存器并 <code>detach</code>，不阻塞 App 自己的业务线程。</li>
+                <li><strong>建立通道：</strong>agent 启动内部工作线程，与 <code>frida-server</code> 建立控制通道，等待电脑端下发脚本。</li>
+              </ol>
+            </article>
+          </div>
+
+          <h3>6.2 Java Hook 原理：<code>.implementation</code> 怎么在原生 ART 上生效？</h3>
+          <p>经典 Xposed 靠刷机直接替换 <code>/system/lib64/libart.so</code> 来新增 <code>EnableXposedHook()</code>；而 Frida 面对的是<strong>未经修改的原生 ART</strong>。它通过 <code>frida-java-bridge</code> 在运行时动态探测当前 Android 版本的 <code>ArtMethod</code> 内存布局，再借助 Gum 的底层读写与原生 Hook 能力完成接管：</p>
+
+          <div class="model-pair" aria-label="Hook 前后 ART 方法调用路径对比">
+            <div class="model-box">
+              <h4>Hook 之前 · 原生 ART 执行</h4>
+              <dl>
+                <div><dt>调用发起</dt><dd>App / 框架调用 <code>Activity.onResume()</code></dd></div>
+                <div><dt><code>ArtMethod</code></dt><dd>保留原始访问标志、入口指针与原实现元数据</dd></div>
+                <div><dt>执行去向</dt><dd>直接进入编译后的机器码（AOT/JIT）或解释器执行原字节码</dd></div>
+              </dl>
+            </div>
+            <div class="model-box after">
+              <h4>Hook 之后 · <code>ArtMethodMangler</code> 接管</h4>
+              <dl>
+                <div><dt>方法改写</dt><dd class="hl">调整目标 <code>ArtMethod</code> 的访问标志与入口指针，把调用引导到桥接分发函数</dd></div>
+                <div><dt>原实现保留</dt><dd>保存原始 <code>ArtMethod</code> 信息，供回调内 <code>onResume.call(this)</code> 再次调用</dd></div>
+                <div><dt>优化对抗</dt><dd class="hl">配合 ART 反优化 / 禁用内联路径处理，避免调用方绕过方法入口直接内联执行</dd></div>
+              </dl>
+            </div>
+          </div>
+
+          <div class="callout">
+            <p><strong>为什么 <code>Java.perform()</code> 必不可少？</strong> <code>hook.js</code> 最初是在 agent 的工作线程中由 GumJS 执行的，这条线程尚未绑定到 ART 的 <code>JavaVM</code>，也没有可用的 <code>JNIEnv</code>。<code>Java.perform(fn)</code> 会先把当前线程 Attach 到 JVM、等待或定位安全执行上下文，再运行你的回调，确保 <code>Java.use()</code> 能正确解析类加载器并安全操作 Java/ART 对象。</p>
+          </div>
+
+          <h3>6.3 底层基石：Gum <code>Interceptor</code> 与 Native Hook</h3>
+          <p>Frida 不只能 Hook Java 方法，它最底层的引擎 <code>frida-gum</code> 本身就是一套跨架构（ARM64 / ARM / x86_64）的<strong>原生二进制插桩库</strong>。当你 Hook 某个 C/C++ 或 <code>.so</code> 导出函数时，<code>Interceptor.attach()</code> 会改写目标函数开头几条机器码，放一条跳转指令到 Gum 动态生成的跳板（trampoline），在 <code>onEnter</code> / <code>onLeave</code> 之间执行 JS 回调，再把被覆盖的原指令迁回跳板执行。即便在纯 Java Hook 场景里，<code>frida-java-bridge</code> 查找 ART 内部符号、读写 <code>ArtMethod</code> 内存、拦截 ART 关键运行时函数，也同样建立在 Gum 提供的原生能力之上。</p>
+
+          <h3>6.4 横向对照：Frida 与经典 Xposed 的定位差异</h3>
+          <p>如果你正在同时阅读同目录的 <a href="xposed-art-hook-principle.html">《Xposed v89 源码解析：ART 方法 Hook 的完整流程》</a>，下面这张表能帮你把两套体系放到同一个坐标系里理解：</p>
+          <div class="table-wrap">
+            <table class="data" aria-label="Frida 与经典 Xposed 对比">
+              <thead>
+                <tr>
+                  <th scope="col">对比维度</th>
+                  <th scope="col">Frida（Server 模式）</th>
+                  <th scope="col">经典 Xposed（v89 / ART）</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">介入时机</th>
+                  <td>动态注入：可随时附加已运行进程（<code>-N</code>），或冷启动拉起（<code>-f</code>）</td>
+                  <td>启动期接管：替换 <code>app_process</code> 与 <code>libart.so</code>，在 Zygote 创建 VM 时加载</td>
+                </tr>
+                <tr>
+                  <th scope="row">系统侵入性</th>
+                  <td>不改 <code>/system</code> 分区，无需重启即可启停（需 root 运行 server，或改用 Gadget）</td>
+                  <td>修改系统二进制与 ART 运行时，安装和模块变更常需重启生效</td>
+                </tr>
+                <tr>
+                  <th scope="row">编写与调试体验</th>
+                  <td>JavaScript 脚本热加载、秒级迭代、支持终端实时交互与日志回传</td>
+                  <td>编写 Java APK 模块编译安装，依赖系统日志观察输出</td>
+                </tr>
+                <tr>
+                  <th scope="row">插桩能力边界</th>
+                  <td><strong>Java（ART）+ Native（C/SO 指令级）</strong>全覆盖，兼有内存搜索与指令追踪</td>
+                  <td>聚焦 <strong>Java / ART 方法层</strong> Hook 与资源替换</td>
+                </tr>
+                <tr>
+                  <th scope="row">实现 ART Hook 方式</th>
+                  <td>运行时探测原生 ART 内存布局（<code>ArtMethodMangler</code>），适配跨版本差异</td>
+                  <td>直接修改 ART 源码新增 <code>EnableXposedHook()</code> 与代理分发分支</td>
+                </tr>
+                <tr>
+                  <th scope="row">典型使用场景</th>
+                  <td>动态逆向分析、协议/加密追踪、快速验证安全假设、自动化测试</td>
+                  <td>持久化功能增强、长期生效的系统/应用行为定制</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- 07 SOURCE INDEX -->
+        <section id="sources" class="chapter">
+          <p class="chapter-kicker">07 / Source Index</p>
+          <h2>源码与参考索引</h2>
+          <p class="muted">所有调用链源码均按固定提交锚定，点击可直接对照对应行号。</p>
+
+          <div class="index-box">
+            <div class="index-group">
+              <h3>顶层仓库与构建配置（<code>frida/frida @ a93582c</code>）</h3>
+              <ul class="index-list">
+                <li><a href="https://github.com/frida/frida/tree/a93582c832d74de1eaa0ec59994365f6981368db">frida/frida 主仓库根目录</a> · <a href="https://github.com/frida/frida/blob/a93582c832d74de1eaa0ec59994365f6981368db/.gitmodules">.gitmodules</a> · <a href="https://github.com/frida/frida/blob/a93582c832d74de1eaa0ec59994365f6981368db/meson.build">meson.build</a></li>
+                <li><a href="https://github.com/frida/releng/tree/a5250c7ee39ee20a0169c256f4a33e5a8d027d5c">frida/releng 构建工具仓库</a> · <a href="https://github.com/frida/frida/blob/a93582c832d74de1eaa0ec59994365f6981368db/tools/ensure-submodules.py">tools/ensure-submodules.py</a></li>
+                <li>子项目构建脚本：<a href="https://github.com/frida/frida-core/blob/1c41f2396787436d207e8b2f21569316f7a06f38/server/meson.build#L38">Server 构建</a> · <a href="https://github.com/frida/frida-core/blob/1c41f2396787436d207e8b2f21569316f7a06f38/lib/agent/meson.build#L64">agent 构建</a> · <a href="https://github.com/frida/frida-core/blob/1c41f2396787436d207e8b2f21569316f7a06f38/lib/gadget/meson.build#L66">Gadget 构建</a> · <a href="https://github.com/frida/frida-gum/blob/45e176dbafaccaa351d09b1836a8a8e16981113c/bindings/gumjs/meson.build#L27">GumJS 构建</a></li>
+              </ul>
+            </div>
+
+            <div class="index-group">
+              <h3>电脑端链路（<code>Frida 16.4.7</code> / <code>frida-tools 12.5.0</code>）</h3>
+              <ul class="index-list">
+                <li><code>frida-tools</code>：<a href="https://github.com/frida/frida-tools/blob/c1002d27b2c6b7aab39e2c74fbb20a255037f407/setup.py#L61">setup.py#L61（命令入口）</a> · <a href="https://github.com/frida/frida-tools/blob/c1002d27b2c6b7aab39e2c74fbb20a255037f407/frida_tools/application.py#L613">application.py#L613（CLI 附加）</a></li>
+                <li><code>frida-python</code>：<a href="https://github.com/frida/frida-python/blob/148ca1461d9b01a9643999540fb1fb64a984d355/frida/core.py#L1058">core.py#L1058（Device.attach）</a> · <a href="https://github.com/frida/frida-python/blob/148ca1461d9b01a9643999540fb1fb64a984d355/frida/_frida/extension.c#L2854">extension.c#L2854（调入 Core C API）</a> · <a href="https://github.com/frida/frida-python/blob/148ca1461d9b01a9643999540fb1fb64a984d355/frida/_frida/meson.build#L14">扩展构建定义</a></li>
+                <li><code>frida-core</code>：<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/frida.vala#L1099">src/frida.vala#L1099（Device.attach 实现）</a></li>
+              </ul>
+            </div>
+
+            <div class="index-group">
+              <h3>ADB 通道、设备端 Server 与 App 内 agent（<code>Frida 16.4.7</code>）</h3>
+              <ul class="index-list">
+                <li>ADB 与 D-Bus：<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/droidy/droidy-host-session.vala#L165">打开 ADB 通道（L165）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/droidy/droidy-host-session.vala#L789">Android 客户端附加（L789）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/droidy/droidy-host-session.vala#L897">建立 D-Bus（L897）</a></li>
+                <li><code>frida-server</code> 与后端：<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/server/server.vala#L201">server.vala#L201</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/control-service.vala#L663">control-service.vala#L663</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L259">应用枚举（L259）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L426">perform_attach_to（L426）</a></li>
+                <li>App 进程内 agent 与静态链接：<a href="https://github.com/frida/releng/blob/f7ba343c9acb19b3b333a8bc5cefd110b550cd9d/meson_configure.py#L90">默认静态链接配置</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/meson.build#L41">agent 构建定义</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/agent.vala#L767">agent 会话（L767）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/payload/script-engine.vala#L87">script-engine（L87）</a></li>
+                <li>GumJS &amp; Java Bridge &amp; AOSP：<a href="https://github.com/frida/frida-gum/blob/4bfc43f0b7f93b6d03d732d221d471d6c6ed7976/bindings/gumjs/runtime/java.js">GumJS java.js</a> · <a href="https://github.com/frida/frida-gum/blob/4bfc43f0b7f93b6d03d732d221d471d6c6ed7976/bindings/gumjs/runtime/console.js#L46">console.js#L46</a> · <a href="https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/index.js#L371">Java.perform（L371）</a> · <a href="https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/lib/class-factory.js#L1720">class-factory（L1720）</a> · <a href="https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/lib/android.js#L3359">ArtMethodMangler（L3359）</a> · <a href="https://android.googlesource.com/platform/art/+/refs/heads/main/runtime/art_method.h">AOSP ArtMethod</a></li>
+              </ul>
+            </div>
+
+            <div class="index-group">
+              <h3>同目录延伸阅读</h3>
+              <ul class="index-list">
+                <li><a href="xposed-art-hook-principle.html">Xposed v89 源码解析：ART 方法 Hook 的完整流程</a></li>
+                <li><a href="xposed-art-animation.html">ART 方法调用与 Xposed Hook · 三段交互动画</a></li>
+                <li><a href="frida-demo.html">原版 Frida Android 源码导读（frida-demo.html）</a></li>
+              </ul>
+            </div>
+          </div>
+
+          <footer class="footer-note">
+            <span>Android Security Field Notes · Frida Android 导读</span>
+            <span>单文件自包含 HTML · 支持离线阅读与交互步进</span>
+          </footer>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // 1. Sidebar Scroll-Spy
+    const tocLinks = [...document.querySelectorAll('#toc a')];
+    const sections = tocLinks
+      .map(link => document.querySelector(link.getAttribute('href')))
+      .filter(Boolean);
+
+    function setActiveToc(id) {
+      for (const link of tocLinks) {
+        const match = link.getAttribute('href') === '#' + id;
+        link.classList.toggle('active', match);
+        if (match) link.setAttribute('aria-current', 'location');
+        else link.removeAttribute('aria-current');
+      }
+    }
+
+    if ('IntersectionObserver' in window && sections.length) {
+      const visibleMap = new Map();
+      const observer = new IntersectionObserver(entries => {
+        for (const entry of entries) {
+          visibleMap.set(entry.target.id, entry.isIntersecting ? entry.boundingClientRect.top : null);
+        }
+        let bestId = null;
+        let bestTop = Infinity;
+        for (const sec of sections) {
+          const top = visibleMap.get(sec.id);
+          if (top !== null && top !== undefined && Math.abs(top) < bestTop) {
+            bestTop = Math.abs(top);
+            bestId = sec.id;
+          }
+        }
+        if (bestId) setActiveToc(bestId);
+      }, { rootMargin: '-12% 0px -65% 0px', threshold: [0, 0.25] });
+
+      sections.forEach(sec => observer.observe(sec));
+    }
+    window.addEventListener('hashchange', () => {
+      const id = location.hash.replace(/^#/, '');
+      if (id) setActiveToc(id);
+    });
+
+    // 2. Copy Buttons
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const target = document.getElementById(btn.dataset.copy);
+        if (!target) return;
+        // Strip annotation banners when copying annotated code
+        const clone = target.cloneNode(true);
+        clone.querySelectorAll('.c-note').forEach(el => el.remove());
+        const text = clone.textContent.replace(/^\n+|\n+$/g, '');
+        try {
+          await navigator.clipboard.writeText(text);
+          const old = btn.textContent;
+          btn.textContent = '已复制';
+          setTimeout(() => { btn.textContent = old; }, 1600);
+        } catch {
+          btn.textContent = '复制失败';
+          setTimeout(() => { btn.textContent = '复制'; }, 1600);
+        }
+      });
+    });
+
+    // 3. Interactive End-to-End Walkthrough
+    const frames = [
+      {
+        title: '第 1 步 · 电脑端启动 CLI 并解析参数',
+        text: '你在 Windows 终端敲下命令，Python 启动 frida_tools.repl:main。CLI 解析 -U（USB 设备）、-N（按包名找运行中进程）和 -l hook.js（读入本地脚本内容）。此时尚未触及手机里的任何进程。',
+        code: 'frida -U -N com.example.demo -l hook.js\n→ frida_tools.repl:main → application.py 解析参数',
+        refs: [
+          ['CLI 入口', 'https://github.com/frida/frida-tools/blob/c1002d27b2c6b7aab39e2c74fbb20a255037f407/setup.py#L61']
+        ],
+        live: ['box-host'],
+        wires: [],
+        changed: ['st-cli'],
+        badges: { host: '解析参数', server: '空闲监听', app: '正常运行' },
+        state: {
+          cli: '已读取 hook.js，准备查找 USB 设备与包名',
+          terminal: '等待附加与脚本输出…',
+          server: 'ControlService 监听中，尚无会话',
+          agent: '未注入（仅 App 自身库）',
+          art: 'Activity.onResume() 指向原始实现'
+        },
+        adbText: 'ADB / D-Bus 通道：尚未建立',
+        agentWire: '进程注入与控制通道：待附加'
+      },
+      {
+        title: '第 2 步 · Python 通过 _frida.pyd 调入电脑端 Core',
+        text: 'CLI 拿到包名对应的 PID 后，在 Python 里调用 self._device.attach(pid)。frida/core.py 转入 CPython 原生扩展 _frida.pyd（C 扩展内静态链接了电脑端 frida-core），调用 frida_device_attach_sync()，进入 Vala 实现的 Device.attach()。',
+        code: 'self._device.attach(pid)\n→ frida/core.py → _frida.pyd (extension.c) → frida_device_attach_sync()',
+        refs: [
+          ['application.py#L613', 'https://github.com/frida/frida-tools/blob/c1002d27b2c6b7aab39e2c74fbb20a255037f407/frida_tools/application.py#L613'],
+          ['extension.c#L2854', 'https://github.com/frida/frida-python/blob/148ca1461d9b01a9643999540fb1fb64a984d355/frida/_frida/extension.c#L2854'],
+          ['frida.vala#L1099', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/frida.vala#L1099']
+        ],
+        live: ['box-host'],
+        wires: [],
+        changed: ['st-cli'],
+        badges: { host: '调入 Core', server: '空闲监听', app: '正常运行' },
+        state: {
+          cli: '已跨过 Python/C 边界进入静态链接的电脑端 Core',
+          terminal: '等待附加与脚本输出…',
+          server: 'ControlService 监听中',
+          agent: '未注入',
+          art: 'Activity.onResume() 指向原始实现'
+        },
+        adbText: 'ADB / D-Bus 通道：准备打开连接',
+        agentWire: '进程注入与控制通道：待附加'
+      },
+      {
+        title: '第 3 步 · 经 ADB 通道与手机建立 D-Bus 连接',
+        text: '电脑端 Core 识别到这是 Android USB 设备，交由 droidy-host-session.vala 通过 ADB 选中设备并打开传输通道，再在通道之上建立 Frida 的 D-Bus 连接，向手机端发送应用枚举与附加请求。',
+        code: 'droidy-host-session.vala:\n  打开 ADB 设备通道 → 建立 Frida D-Bus 连接 → attach(pid)',
+        refs: [
+          ['打开 ADB 通道 L165', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/droidy/droidy-host-session.vala#L165'],
+          ['建立 D-Bus L897', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/droidy/droidy-host-session.vala#L897']
+        ],
+        live: ['box-host', 'box-server'],
+        wires: ['wire-adb'],
+        changed: ['st-server'],
+        badges: { host: '发送请求', server: '收到连接', app: '正常运行' },
+        state: {
+          cli: '电脑端 Core 已通过 ADB 发出附加请求',
+          terminal: '等待附加与脚本输出…',
+          server: 'D-Bus 连接已建立，ControlService 收到请求',
+          agent: '未注入',
+          art: 'Activity.onResume() 指向原始实现'
+        },
+        adbText: 'ADB / D-Bus 通道：已连通，正在传输附加请求',
+        agentWire: '进程注入与控制通道：待附加'
+      },
+      {
+        title: '第 4 步 · frida-server 交由 Linux/Android 后端处理附加',
+        text: '手机上独立 PID 运行的 frida-server 收到请求后，ControlService 将其分发给 HostSession。linux-host-session.vala 定位到 com.example.demo 的目标 PID，随后进入 perform_attach_to() 准备向该进程注入 agent。',
+        code: 'server.vala → control-service.vala\n→ linux-host-session.vala: perform_attach_to(pid)',
+        refs: [
+          ['server.vala#L201', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/server/server.vala#L201'],
+          ['perform_attach_to L426', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L426']
+        ],
+        live: ['box-server'],
+        wires: ['wire-adb'],
+        changed: ['st-server'],
+        badges: { host: '等待会话', server: '准备注入', app: '待附加' },
+        state: {
+          cli: '等待设备端返回 Session',
+          terminal: '等待附加与脚本输出…',
+          server: '已匹配包名 PID，进入 perform_attach_to()',
+          agent: '尚未载入，准备注入 frida-agent.so',
+          art: 'Activity.onResume() 指向原始实现'
+        },
+        adbText: 'ADB / D-Bus 通道：已连通',
+        agentWire: '进程注入与控制通道：正在准备注入目标 PID'
+      },
+      {
+        title: '第 5 步 · 将 frida-agent.so 注入目标 App 进程',
+        text: '设备端注入器暂停目标进程并保存现场，调用系统加载机制将 frida-agent.so 载入 App 的地址空间，再恢复原线程运行。由于 Gum 与 GumJS 已静态链接进 agent.so，此时目标 App 内已经拥有完整的插桩与 JS 运行能力，并与 frida-server 建立控制通道。',
+        code: 'frida-server ──[注入 frida-agent.so]──▶ App PID\nagent.vala: 打开 App 内 agent 会话',
+        refs: [
+          ['agent 构建定义 L41', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/meson.build#L41'],
+          ['agent.vala#L767', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/agent.vala#L767']
+        ],
+        live: ['box-server', 'box-app'],
+        wires: ['wire-agent'],
+        changed: ['st-agent'],
+        badges: { host: 'Session 就绪', server: '中继控制', app: 'agent 已注入' },
+        state: {
+          cli: '已拿到 Session，准备创建并下发脚本',
+          terminal: '已附加到 com.example.demo',
+          server: '已与目标 App 内 agent 建立控制通道',
+          agent: 'frida-agent.so 已载入 App PID（内含 Gum + GumJS）',
+          art: 'Activity.onResume() 尚未改写'
+        },
+        adbText: 'ADB / D-Bus 通道：已连通',
+        agentWire: '进程注入与控制通道：agent.so 已载入并建连'
+      },
+      {
+        title: '第 6 步 · 下发 hook.js 并由 GumJS 引擎执行',
+        text: 'CLI 通过建好的会话把 hook.js 源码发送给 App 内的 agent。script-engine.vala 收到源码后调用静态链接在内的 GumJS，通过 QuickJS/V8 启动脚本并加载内置的 Java Bridge（16.4.7 走 runtime/java.js）。',
+        code: 'CLI ──[hook.js 源码]──▶ agent → script-engine.vala\n→ GumJS 执行脚本并暴露 Java 全局对象',
+        refs: [
+          ['script-engine.vala#L87', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/payload/script-engine.vala#L87'],
+          ['GumJS java.js', 'https://github.com/frida/frida-gum/blob/4bfc43f0b7f93b6d03d732d221d471d6c6ed7976/bindings/gumjs/runtime/java.js']
+        ],
+        live: ['box-app'],
+        wires: ['wire-adb', 'wire-agent'],
+        changed: ['st-agent'],
+        badges: { host: '脚本已下发', server: '会话中继', app: '执行 hook.js' },
+        state: {
+          cli: '已发送 hook.js 并调用 script.load()',
+          terminal: '脚本加载中…',
+          server: '中继脚本创建与加载请求',
+          agent: 'GumJS 正在执行 hook.js，进入 Java.perform()',
+          art: '准备解析 android.app.Activity'
+        },
+        adbText: 'ADB / D-Bus 通道：下发 hook.js 源码',
+        agentWire: '进程注入与控制通道：投递给 script-engine'
+      },
+      {
+        title: '第 7 步 · Java Bridge 定位类并改写 ART 方法入口',
+        text: 'Java.perform() 将当前线程附着到 ART / JavaVM。Java.use() 找到 android.app.Activity 并生成方法包装器。当脚本给 onResume.implementation 赋值时，frida-java-bridge 的 ArtMethodMangler 改写目标 ArtMethod 入口并保留原方法调用句柄。',
+        code: 'Java.use("android.app.Activity").onResume.overload().implementation = fn\n→ class-factory.js → lib/android.js (ArtMethodMangler)',
+        refs: [
+          ['Java.perform L371', 'https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/index.js#L371'],
+          ['class-factory L1720', 'https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/lib/class-factory.js#L1720'],
+          ['ArtMethodMangler L3359', 'https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/lib/android.js#L3359']
+        ],
+        live: ['box-app'],
+        wires: [],
+        changed: ['st-art'],
+        badges: { host: '等待事件', server: '会话保持', app: 'Hook 已生效' },
+        state: {
+          cli: '监听脚本回传消息',
+          terminal: 'Hook 已安装，等待 App 触发 onResume()…',
+          server: '会话保持在线',
+          agent: 'hook.js 回调驻留于 GumJS 中',
+          art: 'Activity.onResume() 入口已改写 → 指向 JS 回调'
+        },
+        adbText: 'ADB / D-Bus 通道：保持长连接',
+        agentWire: '进程注入与控制通道：保持长连接'
+      },
+      {
+        title: '第 8 步 · App 触发 onResume()，日志沿会话回传终端',
+        text: '把 App 切回前台时，ART 调用 Activity.onResume() 命中改写后的入口，转入 JS 回调：console.log("onResume called") 经 GumJS 的 console.js 编为日志消息，经 agent → frida-server → ADB 传回电脑终端；随后 onResume.call(this) 执行原方法，App 正常恢复界面。',
+        code: 'App 调用 onResume() → ART → Java Bridge → JS 回调\n  ├─ console.log() → console.js → 终端输出: onResume called\n  └─ onResume.call(this) → 执行原 Activity.onResume()',
+        refs: [
+          ['console.js#L46', 'https://github.com/frida/frida-gum/blob/4bfc43f0b7f93b6d03d732d221d471d6c6ed7976/bindings/gumjs/runtime/console.js#L46'],
+          ['AOSP Activity.java', 'https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/app/Activity.java']
+        ],
+        live: ['box-app', 'box-server', 'box-host'],
+        wires: ['wire-agent', 'wire-adb'],
+        changed: ['st-art', 'st-terminal'],
+        badges: { host: '收到日志', server: '回传中继', app: '命中回调' },
+        state: {
+          cli: '收到脚本日志事件并输出到标准输出',
+          terminal: 'onResume called',
+          server: '将 agent 上报的日志消息转发给电脑端',
+          agent: 'console.js 已封装日志并经会话发出',
+          art: '命中 JS 回调后，继续执行原始 onResume()'
+        },
+        adbText: 'ADB / D-Bus 通道：回传日志消息 → 电脑端 CLI',
+        agentWire: '进程注入与控制通道：agent 上报 console.log 消息'
+      }
+    ];
+
+    const byId = id => document.getElementById(id);
+    const stepList = byId('step-list');
+    const stepButtons = [...stepList.querySelectorAll('.step-btn')];
+    const token = byId('step-token');
+    const btnPlay = byId('btn-play');
+    const btnPrev = byId('btn-prev');
+    const btnNext = byId('btn-next');
+    const btnReset = byId('btn-reset');
+    const phaseBtns = [...document.querySelectorAll('.phase-pills button')];
+
+    let step = 0;
+    let timer = null;
+
+    function positionToken(animate) {
+      const outer = stepList.getBoundingClientRect();
+      const target = stepButtons[step].getBoundingClientRect();
+      token.classList.toggle('moving', animate);
+      token.style.transform = `translateY(${target.top - outer.top + (target.height - 12) / 2}px)`;
+      token.hidden = false;
+    }
+
+    function render(animate = true) {
+      const f = frames[step];
+
+      stepButtons.forEach((btn, i) => {
+        if (i === step) btn.setAttribute('aria-current', 'step');
+        else btn.removeAttribute('aria-current');
+      });
+
+      ['box-host', 'box-server', 'box-app'].forEach(id => {
+        byId(id).classList.toggle('live', f.live.includes(id));
+      });
+      ['wire-adb', 'wire-agent'].forEach(id => {
+        byId(id).classList.toggle('live', f.wires.includes(id));
+      });
+
+      byId('host-badge').textContent = f.badges.host;
+      byId('server-badge').textContent = f.badges.server;
+      byId('app-badge').textContent = f.badges.app;
+      byId('wire-adb-text').textContent = f.adbText;
+      byId('wire-agent-text').textContent = f.agentWire;
+
+      const map = {
+        'st-cli': f.state.cli,
+        'st-terminal': f.state.terminal,
+        'st-server': f.state.server,
+        'st-agent': f.state.agent,
+        'st-art': f.state.art
+      };
+      for (const [id, text] of Object.entries(map)) {
+        const row = byId(id);
+        row.querySelector('dd').textContent = text;
+        row.classList.toggle('changed', f.changed.includes(id));
+      }
+
+      byId('ann-title').textContent = f.title;
+      byId('ann-text').textContent = f.text;
+      byId('ann-code').textContent = f.code;
+
+      const refsEl = byId('ann-refs');
+      refsEl.innerHTML = '';
+      f.refs.forEach(([label, href]) => {
+        const a = document.createElement('a');
+        a.href = href;
+        a.textContent = `查看源码：${label}`;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        refsEl.appendChild(a);
+      });
+
+      byId('step-progress').textContent = `第 ${step + 1} / ${frames.length} 步`;
+      btnPrev.disabled = step === 0;
+      btnNext.disabled = step === frames.length - 1;
+      btnPlay.textContent = timer !== null ? '暂停' : step === frames.length - 1 ? '重播' : '播放';
+
+      phaseBtns[0].classList.toggle('is-phase', step < 5);
+      phaseBtns[1].classList.toggle('is-phase', step >= 5);
+
+      positionToken(animate);
+    }
+
+    function stop() {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    }
+
+    function seek(next) {
+      stop();
+      step = Math.max(0, Math.min(frames.length - 1, next));
+      render(true);
+    }
+
+    btnPlay.addEventListener('click', () => {
+      if (timer !== null) { stop(); render(false); return; }
+      if (step === frames.length - 1) step = 0;
+      timer = setInterval(() => {
+        step++;
+        if (step === frames.length - 1) stop();
+        render(true);
+      }, 2600);
+      render(true);
+    });
+    btnPrev.addEventListener('click', () => seek(step - 1));
+    btnNext.addEventListener('click', () => seek(step + 1));
+    btnReset.addEventListener('click', () => seek(0));
+    stepButtons.forEach((btn, i) => btn.addEventListener('click', () => seek(i)));
+    phaseBtns.forEach(btn => btn.addEventListener('click', () => seek(Number(btn.dataset.jump))));
+
+    if ('ResizeObserver' in window) {
+      new ResizeObserver(() => positionToken(false)).observe(stepList);
+    } else {
+      window.addEventListener('resize', () => positionToken(false));
+    }
+
+    render(false);
+  </script>
+</body>
+</html>
