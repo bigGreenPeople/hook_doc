@@ -1,0 +1,1811 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frida Android 进程注入原理：ptrace、两阶段加载器与 memfd 跨进程传递｜Android Security Notes</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --paper: #ffffff;
+      --sidebar-bg: #eef2f8;
+      --ink: #162338;
+      --sub: #4b5d75;
+      --muted: #687a93;
+      --line: #d6e0ec;
+      --line-soft: #e6ecf5;
+      --blue: #224b94;
+      --blue-strong: #193975;
+      --blue-soft: #e9f0fd;
+      --teal: #0e6b5c;
+      --teal-soft: #e7f6f2;
+      --amber: #b45318;
+      --amber-soft: #fff2e8;
+      --violet: #5b3b9c;
+      --violet-soft: #f2ecfe;
+      --code-bg: #111e30;
+      --code-bar: #1a2c44;
+      --code-ink: #eaf1fb;
+      --mono: "Cascadia Code", Consolas, ui-monospace, SFMono-Regular, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.76 var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+    ::selection { background: #c8defe; color: #102138; }
+    a { color: var(--blue); text-underline-offset: 3px; }
+    a:hover { color: var(--blue-strong); }
+    code, pre { font-family: var(--mono); }
+    code {
+      font-size: 0.87em;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #edf2fa;
+      color: #163055;
+      overflow-wrap: anywhere;
+    }
+    pre code { padding: 0; background: transparent; color: inherit; font-size: inherit; }
+    :focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+
+    /* Shell */
+    .shell {
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+      max-width: 1400px;
+      margin: 0 auto;
+      min-height: 100vh;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--line);
+    }
+    .side-inner {
+      position: sticky;
+      top: 0;
+      max-height: 100vh;
+      overflow: auto;
+      padding: 28px 16px 28px 22px;
+    }
+    .brand {
+      font: 700 11.5px/1.4 var(--mono);
+      letter-spacing: 0.1em;
+      color: var(--blue);
+      margin: 0 0 12px;
+    }
+    .back-home {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0 0 20px;
+      padding: 5px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--sub);
+      font-size: 12.5px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .back-home:hover { border-color: var(--blue); color: var(--blue-strong); }
+    .side-title {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 0 0 10px;
+      padding-left: 10px;
+    }
+    .toc { display: grid; gap: 3px; }
+    .toc a {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      padding: 7px 10px 7px 12px;
+      border-left: 3px solid transparent;
+      border-radius: 0 6px 6px 0;
+      color: #3a4c66;
+      font-size: 14px;
+      line-height: 1.45;
+      text-decoration: none;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .toc a.sub {
+      padding: 4px 10px 4px 30px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .toc a .num {
+      font: 700 11px var(--mono);
+      color: var(--muted);
+      min-width: 18px;
+    }
+    .toc a:hover { background: #e1e9f6; color: var(--ink); }
+    .toc a.active {
+      border-left-color: var(--blue);
+      background: var(--blue-soft);
+      color: var(--blue-strong);
+      font-weight: 700;
+    }
+    .toc a.active .num { color: var(--blue); }
+    .side-foot {
+      margin-top: 26px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      font-size: 12px;
+      line-height: 1.65;
+      color: var(--muted);
+    }
+    .side-foot code { font-size: 11px; }
+
+    /* Main */
+    .main {
+      min-width: 0;
+      background: var(--paper);
+      padding: 0 54px 96px;
+    }
+    .content {
+      max-width: 980px;
+      margin: 0 auto;
+    }
+
+    /* Hero */
+    .hero {
+      padding: 46px 0 34px;
+      border-bottom: 1px solid var(--line);
+    }
+    .scope-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font: 700 12px/1.4 var(--mono);
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+    .badge.teal { background: var(--teal-soft); color: var(--teal); }
+    .badge.amber { background: var(--amber-soft); color: var(--amber); }
+    .hero h1 {
+      margin: 0 0 14px;
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1.2;
+      letter-spacing: -0.025em;
+    }
+    .hero-lead {
+      max-width: 800px;
+      margin: 0;
+      font-size: 17.5px;
+      line-height: 1.72;
+      color: var(--sub);
+    }
+
+    /* Chapters */
+    .chapter {
+      padding: 44px 0 48px;
+      border-bottom: 1px solid var(--line);
+      scroll-margin-top: 20px;
+    }
+    .chapter:last-child { border-bottom: 0; }
+    .chapter-kicker {
+      font: 700 12px var(--mono);
+      letter-spacing: 0.08em;
+      color: var(--amber);
+      margin: 0 0 6px;
+      text-transform: uppercase;
+    }
+    .chapter h2 {
+      margin: 0 0 16px;
+      font-size: 27px;
+      line-height: 1.3;
+      letter-spacing: -0.015em;
+    }
+    .chapter h3 {
+      margin: 30px 0 10px;
+      font-size: 19px;
+      line-height: 1.4;
+      scroll-margin-top: 22px;
+    }
+    .chapter p { margin: 0 0 14px; max-width: 830px; }
+    .lead { font-size: 17px; color: #2d425e; }
+    .muted { color: var(--sub); font-size: 14px; }
+    ul, ol { margin: 0 0 16px; padding-left: 1.45em; }
+    li + li { margin-top: 6px; }
+
+    /* Callouts */
+    .callout {
+      margin: 20px 0;
+      padding: 15px 18px;
+      border-left: 4px solid var(--blue);
+      border-radius: 0 8px 8px 0;
+      background: var(--blue-soft);
+      font-size: 14.5px;
+    }
+    .callout p { margin: 0; max-width: none; }
+    .callout p + p { margin-top: 8px; }
+    .callout strong { color: var(--blue-strong); }
+    .callout.teal { border-left-color: var(--teal); background: var(--teal-soft); }
+    .callout.teal strong { color: #094f43; }
+    .callout.amber { border-left-color: var(--amber); background: var(--amber-soft); }
+    .callout.amber strong { color: #8c3d0d; }
+    .callout.violet { border-left-color: var(--violet); background: var(--violet-soft); }
+    .callout.violet strong { color: #432678; }
+
+    /* 4-Stage Summary Cards */
+    .stage-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 22px 0;
+    }
+    .stage-card {
+      padding: 15px 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fbfcfe;
+    }
+    .stage-card .s-tag {
+      display: inline-block;
+      font: 700 11.5px var(--mono);
+      color: var(--amber);
+      margin-bottom: 6px;
+    }
+    .stage-card h3 { margin: 0 0 6px; font-size: 15.5px; }
+    .stage-card p { margin: 0; font-size: 13.5px; line-height: 1.58; color: var(--sub); }
+
+    /* Myth vs Reality */
+    .compare-pair {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin: 20px 0;
+    }
+    .compare-box {
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fbfcfe;
+    }
+    .compare-box.real {
+      border-color: #9ec8be;
+      background: #f5fbf9;
+    }
+    .compare-box h4 {
+      margin: 0 0 10px;
+      font-size: 15.5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .compare-box ul { margin: 0; padding-left: 1.2em; font-size: 14px; color: var(--sub); }
+    .compare-box li + li { margin-top: 6px; }
+
+    /* Interactive Walkthrough Board */
+    .board {
+      margin: 22px 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--paper);
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(22, 35, 56, 0.04);
+    }
+    .board-toolbar {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 12px 16px;
+      background: #f5f8fc;
+      border-bottom: 1px solid var(--line);
+    }
+    .board-toolbar button {
+      min-height: 35px;
+      padding: 4px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      font: 600 13.5px var(--sans);
+      cursor: pointer;
+    }
+    .board-toolbar button:hover:not(:disabled) { border-color: var(--blue); color: var(--blue); }
+    .board-toolbar button:disabled { opacity: 0.45; cursor: default; }
+    .board-toolbar #btn-play {
+      min-width: 74px;
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
+    .board-toolbar #btn-play:hover { background: var(--blue-strong); color: #fff; }
+    .phase-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-left: 4px; }
+    .phase-pills button { font-size: 12px; padding: 4px 8px; color: var(--sub); }
+    .phase-pills button.is-phase {
+      background: var(--blue-soft);
+      border-color: var(--blue);
+      color: var(--blue-strong);
+    }
+    #step-progress { margin-left: auto; font: 600 13px var(--mono); color: var(--sub); }
+    .board-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    }
+    .board-steps { padding: 16px; position: relative; }
+    .board-state {
+      padding: 16px;
+      background: #f8fafd;
+      border-left: 1px solid var(--line);
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+    .board-col-title {
+      margin: 0 0 8px;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--sub);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .step-list {
+      position: relative;
+      list-style: none;
+      margin: 0;
+      padding: 0 0 0 22px;
+    }
+    .step-list::before {
+      content: "";
+      position: absolute;
+      left: 5px;
+      top: 20px;
+      bottom: 20px;
+      border-left: 2px solid #b5c6dc;
+    }
+    .step-list li { position: relative; margin: 0 0 6px; }
+    .step-list > li:nth-last-child(2) { margin-bottom: 0; }
+    .step-btn {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      font-family: var(--sans);
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .step-btn:hover { border-color: #9cb5d8; background: #fbfdff; }
+    .step-btn[aria-current="step"] {
+      background: var(--blue-soft);
+      border-color: var(--blue);
+    }
+    .step-btn b { display: block; font-size: 13px; line-height: 1.35; }
+    .step-btn .subline {
+      display: block;
+      margin-top: 2px;
+      font: 11.5px/1.4 var(--mono);
+      color: var(--sub);
+      overflow-wrap: anywhere;
+    }
+    .step-token {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 12px;
+      height: 12px;
+      margin: 0;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 0 3px #cde0ff;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .step-token.moving { transition: transform 0.45s cubic-bezier(0.22, 0.72, 0.24, 1); }
+
+    .state-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .state-box.live {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 2px rgba(14, 107, 92, 0.12);
+    }
+    .state-box-head {
+      padding: 7px 11px;
+      background: #f0f4f9;
+      border-bottom: 1px solid var(--line-soft);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12.5px;
+      font-weight: 700;
+    }
+    .state-box.live .state-box-head {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+    .state-box dl { margin: 0; padding: 7px 11px; font-size: 12.5px; }
+    .state-box dl > div {
+      display: grid;
+      grid-template-columns: 98px minmax(0, 1fr);
+      gap: 8px;
+      padding: 4px 0;
+    }
+    .state-box dl > div + div { border-top: 1px solid var(--line-soft); }
+    .state-box dt { color: var(--muted); font-weight: 600; font-family: var(--mono); font-size: 12px; }
+    .state-box dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+    .state-box dl > div.changed {
+      background: var(--teal-soft);
+      margin: 2px -6px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      border-top: 0;
+    }
+    .state-box dl > div.changed dd { color: var(--teal); font-weight: 700; }
+
+    .board-annotation {
+      padding: 14px 18px;
+      border-top: 1px solid var(--line);
+      background: #fff;
+    }
+    .board-annotation h3 { margin: 0 0 6px; font-size: 16px; }
+    .board-annotation p { margin: 0 0 8px; font-size: 14.5px; color: var(--sub); max-width: none; }
+    .board-code {
+      margin: 0;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: #edf3fc;
+      color: #163259;
+      font: 13px/1.55 var(--mono);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .board-refs {
+      margin-top: 8px;
+      font-size: 13px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 14px;
+    }
+
+    /* IDE Source Excerpt Cards */
+    .source-excerpt {
+      margin: 18px 0 22px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--paper);
+    }
+    .source-filebar {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 6px 14px;
+      padding: 9px 16px;
+      background: #eaf0f8;
+      border-bottom: 1px solid var(--line);
+    }
+    .source-filebar strong { font-size: 14px; }
+    .source-ranges { font-size: 13px; font-weight: 600; display: flex; flex-wrap: wrap; gap: 6px 12px; }
+    .source-metadata {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 16px;
+      padding: 6px 16px;
+      background: #f8fafd;
+      border-bottom: 1px solid var(--line-soft);
+      color: var(--sub);
+      font-size: 12.5px;
+    }
+    .source-context {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 12px;
+      padding: 6px 16px 8px;
+      background: #f8fafd;
+      font-size: 12.5px;
+      color: var(--ink);
+      border-bottom: 1px solid #203754;
+    }
+    .source-context strong { color: var(--muted); }
+    .source-excerpt pre {
+      margin: 0;
+      padding: 14px 16px;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.68;
+      tab-size: 4;
+    }
+    .source-excerpt pre::selection, .source-excerpt pre *::selection {
+      background: #9ac5ff;
+      color: #0e1c30;
+    }
+    .source-note {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: baseline;
+      gap: 8px;
+      margin: 6px 0 3px;
+      padding: 4px 8px;
+      border-left: 2px solid #5e90c8;
+      border-radius: 0 4px 4px 0;
+      background: #1a2d45;
+      color: #d4e8fd;
+      font: 12.5px/1.55 var(--sans);
+      white-space: normal;
+    }
+    .source-note-label {
+      padding: 0 5px;
+      border-radius: 3px;
+      background: #2b4a6f;
+      color: #e6f2ff;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .source-summary {
+      padding: 10px 16px;
+      border-top: 1px solid var(--line);
+      background: #fafcfe;
+      font-size: 13.5px;
+      color: var(--sub);
+    }
+
+    /* Pure CSS Sequence Diagram */
+    .timing {
+      margin: 22px 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--paper);
+      overflow: hidden;
+    }
+    .timing figcaption {
+      padding: 12px 16px;
+      background: #eef3fa;
+      border-bottom: 1px solid var(--line);
+      font-weight: 700;
+      font-size: 14.5px;
+    }
+    .timing-scroll { overflow-x: auto; }
+    .lifelines { min-width: 720px; padding: 14px 12px 12px; }
+    .lane-row {
+      display: grid;
+      grid-template-columns: repeat(var(--lanes), minmax(0, 1fr));
+      min-height: 52px;
+      text-align: center;
+    }
+    .lane-head { min-height: 0; margin-bottom: 6px; }
+    .lane-head span {
+      padding: 8px 6px;
+      margin: 0 3px;
+      border-radius: 6px;
+      background: #edf2fa;
+      border: 1px solid var(--line);
+      font-weight: 700;
+      font-size: 13px;
+      line-height: 1.3;
+    }
+    .lane-row i {
+      grid-row: 1;
+      background: linear-gradient(var(--line), var(--line)) center/1px 100% no-repeat;
+    }
+    .lane-divider {
+      grid-column: 1 / -1;
+      align-self: center;
+      margin: 6px 0;
+      padding: 4px 10px;
+      border-radius: 4px;
+      background: #f3f6fb;
+      border: 1px dashed #c4d3e6;
+      font: 700 12px var(--mono);
+      color: var(--sub);
+      text-align: left;
+    }
+    .msg {
+      grid-row: 1;
+      position: relative;
+      align-self: center;
+      padding: 0 10px 8px;
+      font-size: 12.5px;
+      line-height: 1.35;
+      color: var(--ink);
+    }
+    .msg::before {
+      content: "";
+      position: absolute;
+      bottom: 0;
+      left: var(--edge);
+      right: var(--edge);
+      border-bottom: 2px solid var(--blue);
+    }
+    .msg::after {
+      content: "";
+      position: absolute;
+      bottom: -4px;
+      border: 5px solid transparent;
+    }
+    .msg.forward::after { right: var(--edge); border-left-color: var(--blue); border-right: 0; }
+    .msg.back::before { border-bottom-style: dashed; border-bottom-color: var(--teal); }
+    .msg.back::after { left: var(--edge); border-right-color: var(--teal); border-left: 0; }
+    .timing-foot {
+      margin: 0;
+      padding: 10px 16px;
+      border-top: 1px solid var(--line);
+      background: #fafcfe;
+      font-size: 13.5px;
+      color: var(--sub);
+    }
+
+    /* Tables */
+    .table-wrap {
+      margin: 18px 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: auto;
+      background: var(--paper);
+    }
+    table.data {
+      width: 100%;
+      min-width: 640px;
+      border-collapse: collapse;
+      font-size: 13.5px;
+      text-align: left;
+    }
+    table.data th, table.data td {
+      padding: 11px 13px;
+      border-bottom: 1px solid var(--line-soft);
+      vertical-align: top;
+    }
+    table.data thead th {
+      background: #eef3fa;
+      color: var(--ink);
+      font-weight: 700;
+      border-bottom: 1px solid var(--line);
+    }
+    table.data tbody th { font-weight: 700; color: var(--ink); white-space: nowrap; }
+    table.data tbody tr:last-child th,
+    table.data tbody tr:last-child td { border-bottom: 0; }
+
+    /* Trace cards */
+    .trace-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin: 18px 0;
+    }
+    .trace-card {
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fbfcfe;
+    }
+    .trace-card h4 {
+      margin: 0 0 6px;
+      font-size: 15px;
+      color: var(--blue-strong);
+    }
+    .trace-card p { margin: 0; font-size: 13.8px; color: var(--sub); line-height: 1.65; }
+
+    /* Source Index */
+    .index-box {
+      padding: 20px 22px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f7f9fd;
+    }
+    .index-group + .index-group {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+    .index-group h3 { margin: 0 0 8px; font-size: 15px; color: var(--blue-strong); }
+    .index-list { margin: 0; padding-left: 1.2em; font-size: 13.5px; line-height: 1.75; }
+    .next-post {
+      margin-top: 20px;
+      padding: 16px 18px;
+      border: 1px dashed #a9bedd;
+      border-radius: 10px;
+      background: #f9fbff;
+      font-size: 14.5px;
+    }
+    .next-post strong { color: var(--blue-strong); }
+    .footer-note {
+      margin-top: 28px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+
+    /* Responsive */
+    @media (max-width: 1080px) {
+      .shell { grid-template-columns: 206px minmax(0, 1fr); }
+      .main { padding: 0 28px 72px; }
+      .stage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 820px) {
+      .shell { display: block; }
+      .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+      .side-inner { position: static; max-height: none; padding: 14px 16px; }
+      .brand { margin-bottom: 8px; }
+      .side-title, .side-foot, .toc a.sub { display: none; }
+      .toc { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 2px; }
+      .toc a {
+        white-space: nowrap;
+        border-left: 0;
+        border-bottom: 3px solid transparent;
+        border-radius: 5px 5px 0 0;
+        padding: 6px 10px;
+      }
+      .toc a.active { border-bottom-color: var(--blue); }
+      .main { padding: 0 18px 60px; }
+      .compare-pair, .board-grid, .trace-grid { grid-template-columns: 1fr; }
+      .board-state { border-left: 0; border-top: 1px solid var(--line); }
+    }
+    @media (max-width: 520px) {
+      .stage-grid { grid-template-columns: 1fr; }
+      #step-progress { margin-left: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .step-token.moving { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" aria-label="文章目录">
+      <div class="side-inner">
+        <div class="brand">ANDROID SECURITY / NOTES</div>
+        <a class="back-home" href="index.html">← 返回文档索引</a>
+        <div class="side-title">本篇目录</div>
+        <nav class="toc" id="toc">
+          <a href="#overview" class="active"><span class="num">01</span>破除误区与两阶段全局</a>
+          <a href="#walkthrough"><span class="num">02</span>9 步注入交互演示</a>
+          <a href="#source-deep"><span class="num">03</span>逐行源码拆解</a>
+          <a href="#s-entry" class="sub">· 3.1 memfd 备弹与入口</a>
+          <a href="#s-remotecall" class="sub">· 3.2 ptrace 与 RemoteCall</a>
+          <a href="#s-bootstrap" class="sub">· 3.3 阶段一 bootstrapper</a>
+          <a href="#s-loader" class="sub">· 3.4 阶段二 loader 与 namespace</a>
+          <a href="#s-agent" class="sub">· 3.5 frida_agent_main 建连</a>
+          <a href="#sequence"><span class="num">04</span>完整信号与握手时序</a>
+          <a href="#spawn-vs-attach"><span class="num">05</span>Attach (-N) vs Spawn (-f)</a>
+          <a href="#artifacts"><span class="num">06</span>原理反推进程痕迹</a>
+          <a href="#sources"><span class="num">07</span>源码索引</a>
+        </nav>
+        <div class="side-foot">
+          衔接前篇：<a href="frida-android-guide-v2.html">第一篇 仓库与落位</a><br>
+          固定提交：<code>frida-core @ 78ff6e5b</code><br>
+          版本基准：<code>Frida 16.4.7</code>（ARM64 Android）
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="content">
+        <header class="hero">
+          <div class="scope-row">
+            <span class="badge">Frida Android 系列 · 第二篇</span>
+            <span class="badge teal">frida-core @ 78ff6e5b (Frida 16.4.7)</span>
+            <span class="badge amber">ARM64 Android · 无猜测逐行源码</span>
+          </div>
+          <h1><code>frida-server</code> 如何把 <code>frida-agent.so</code> 注入目标 App？</h1>
+          <p class="hero-lead">接着上一篇停下的位置——<code>linux-host-session.vala::perform_attach_to(pid)</code>——深入 <code>frida-core</code> 源码，拆开整个跨进程注入黑盒：Frida 如何用 <strong><code>PTRACE_SEIZE</code> + 假返回地址 <code>0x320</code> 远程调用</strong>、<strong><code>bootstrapper</code> + <code>loader</code> 两阶段无依赖二进制</strong>、<strong><code>memfd</code> + <code>SCM_RIGHTS</code> 跨进程传 FD</strong>，以及<strong>伪装 <code>libc-&gt;close</code> 地址绕过 Android Linker Namespace</strong>，在毫秒级暂停内将 <code>frida-agent.so</code> 送进目标进程并点亮 D-Bus 会话。</p>
+        </header>
+
+        <!-- ==================== 01 OVERVIEW ==================== -->
+        <section id="overview" class="chapter">
+          <p class="chapter-kicker">01 / Mental Model</p>
+          <h2>先破除一个老误区：现代 Frida 绝不在 <code>ptrace</code> 里直接调 <code>dlopen</code></h2>
+          <p class="lead">网上很多旧文章把 Android 注入概括成“<code>ptrace</code> 停住 App 主线程 → 远程调用 <code>dlopen('/data/local/tmp/frida-agent.so')</code> → 恢复运行”。这套传统写法在现代 Android（Android 7+ Linker Namespace、严格 SELinux、多线程锁冲突）上几乎处处碰壁。</p>
+
+          <div class="compare-pair">
+            <article class="compare-box">
+              <h4>❌ 传统直调 <code>dlopen</code> 的四个死穴</h4>
+              <ul>
+                <li><strong>死锁风险</strong>：被暂停的线程可能正好拿着 linker / malloc 锁，在 <code>ptrace</code> 停顿状态里直接调 <code>dlopen</code> 极易死锁或卡死 UI 触发 ANR。</li>
+                <li><strong>Linker Namespace 拦截</strong>：Android 7+ 的 <code>__loader_dlopen</code> 会检查<strong>调用者返回地址</strong>所属的 namespace，匿名可执行页里的 shellcode 直接调会被拒绝加载。</li>
+                <li><strong>SELinux 文件域限制</strong>：把 <code>.so</code> 写到 <code>/data/local/tmp</code> 等目录，目标 App 的 SELinux 域可能根本无权读取或 <code>mmap(PROT_EXEC)</code>。</li>
+                <li><strong>目标 libc 位置未知</strong>：不同容器、chroot 或早期进程里，目标的 <code>libc.so</code> / <code>linker64</code> 映射甚至与 <code>frida-server</code> 不同，盲算偏移直接崩溃。</li>
+              </ul>
+            </article>
+
+            <article class="compare-box real">
+              <h4>✅ Frida 16.4.7 的真实四重破局设计</h4>
+              <ul>
+                <li><strong><code>ptrace</code> 只干极轻的活</strong>：<code>loader</code> 入口 <code>frida_load()</code> 只执行一行 <code>pthread_create()</code> 就立刻返回并 <code>DETACH</code>，真正耗时的 <code>dlopen</code> 全部放到独立后台线程里跑。</li>
+                <li><strong>伪装调用者地址</strong>：调用 Android linker 的 <code>__loader_dlopen</code> 时，把第 3 个参数 <code>caller_addr</code> 填成 <strong><code>libc-&gt;close</code></strong> 的地址，合法借用系统默认 namespace。</li>
+                <li><strong><code>memfd</code> + <code>SCM_RIGHTS</code> 传 FD</strong>：<code>agent.so</code> 优先塞进内存文件 <code>memfd</code>，通过 Unix Socket 跨进程把 FD 送进目标 App，再由 App 自己 <code>dlopen("/proc/self/fd/&lt;N&gt;")</code>。</li>
+                <li><strong>两阶段独立汇编载荷</strong>：预先用 <code>nolibc</code> 编译好 <code>bootstrapper-arm64.bin</code> 和 <code>loader-arm64.bin</code>；阶段一先在目标进程内现场查 <code>/proc/self/auxv</code> 与 ELF 导出表，摸清所有函数地址。</li>
+              </ul>
+            </article>
+          </div>
+
+          <div class="stage-grid">
+            <article class="stage-card">
+              <span class="s-tag">STAGE 01</span>
+              <h3><code>memfd</code> 备弹</h3>
+              <p><code>Linjector</code> 取出内嵌的 <code>frida-agent-64.so</code> 放入匿名内存文件 <code>memfd</code>，把 FD 交给 <code>LinuxHelperBackend</code>。</p>
+            </article>
+            <article class="stage-card">
+              <span class="s-tag">STAGE 02</span>
+              <h3>阶段一 <code>bootstrapper</code></h3>
+              <p><code>PTRACE_SEIZE</code> 暂停线程，分配 RWX 内存并运行 <code>bootstrapper</code>：解析 <code>libc</code> / <code>__loader_dlopen</code>，并建好 <code>ctrlfds</code> 通道。</p>
+            </article>
+            <article class="stage-card">
+              <span class="s-tag">STAGE 03</span>
+              <h3>阶段二 <code>loader</code></h3>
+              <p>把 <code>loader</code> 写入同一块 RWX 内存，调用 <code>frida_load()</code> 拉起后台 <code>worker</code> 线程后，<strong>立刻恢复原寄存器并 <code>DETACH</code></strong>。</p>
+            </article>
+            <article class="stage-card">
+              <span class="s-tag">STAGE 04</span>
+              <h3>传 FD 与点亮 D-Bus</h3>
+              <p><code>frida-server</code> 发来 <code>agent_codefd</code> 与 <code>agent_ctrlfd</code>；<code>worker</code> 伪装 caller 调 <code>dlopen</code>，再进 <code>frida_agent_main()</code> 建 D-Bus。</p>
+            </article>
+          </div>
+        </section>
+
+        <!-- ==================== 02 INTERACTIVE WALKTHROUGH ==================== -->
+        <section id="walkthrough" class="chapter">
+          <p class="chapter-kicker">02 / Interactive Walkthrough</p>
+          <h2>9 步注入交互演示：看寄存器、内存与文件描述符如何一步步到位</h2>
+          <p class="lead">点击<strong>播放</strong>或任意一步，观察 <code>frida-server</code>、被 <code>ptrace</code> 劫持的 App 主线程（ARM64 寄存器）以及 App 进程内的内存与新线程如何协同完成整次注入。</p>
+
+          <section class="board" aria-label="Frida 16.4.7 进程注入交互演示">
+            <div class="board-toolbar">
+              <button type="button" id="btn-play">播放</button>
+              <button type="button" id="btn-prev">上一步</button>
+              <button type="button" id="btn-next">下一步</button>
+              <button type="button" id="btn-reset">重置</button>
+              <div class="phase-pills" role="group" aria-label="阶段快切">
+                <button type="button" data-jump="0" class="is-phase">准备与劫持 (1–3)</button>
+                <button type="button" data-jump="3">两阶段执行 (4–6)</button>
+                <button type="button" data-jump="6">传 FD 与建连 (7–9)</button>
+              </div>
+              <output id="step-progress" aria-live="polite">第 1 / 9 步</output>
+            </div>
+
+            <div class="board-grid">
+              <div class="board-steps">
+                <h3 class="board-col-title">注入控制流（点击直达）</h3>
+                <ol class="step-list" id="step-list">
+                  <li><button type="button" class="step-btn" aria-current="step"><b>1. 准备 <code>frida-agent.so</code> 的 <code>memfd</code></b><span class="subline">perform_attach_to() → Linjector::inject_library_resource()</span></button></li>
+                  <li><button type="button" class="step-btn"><b>2. <code>PTRACE_SEIZE</code> 暂停目标线程并备份寄存器</b><span class="subline">SeizeSession → SEIZE + INTERRUPT + GETREGSET</span></button></li>
+                  <li><button type="button" class="step-btn"><b>3. 在目标进程内开辟 RWX 内存区</b><span class="subline">RemoteCall(remote_mmap) 或 ProcessCodeSwapScope</span></button></li>
+                  <li><button type="button" class="step-btn"><b>4. 写入并运行阶段一 <code>bootstrapper</code></b><span class="subline">探 /proc/self/auxv、解析 __loader_dlopen、建 ctrlfds</span></button></li>
+                  <li><button type="button" class="step-btn"><b>5. 偷回 <code>ctrlfds[0]</code> 并写入阶段二 <code>loader</code></b><span class="subline">pidfd_getfd(ctrlfds[0]) + 写 loader.bin 与上下文</span></button></li>
+                  <li><button type="button" class="step-btn"><b>6. 调用 <code>frida_load()</code> 拉起线程后秒速 <code>DETACH</code></b><span class="subline">pthread_create(frida_main) → 触发 LR=0x320 SIGSEGV → 恢复现场</span></button></li>
+                  <li><button type="button" class="step-btn"><b>7. <code>HELLO</code> 握手 + <code>SCM_RIGHTS</code> 传入 <code>agent_codefd</code></b><span class="subline">frida_ctrl.send_fd(memfd) → frida_receive_fd()</span></button></li>
+                  <li><button type="button" class="step-btn"><b>8. 伪装 <code>libc-&gt;close</code> 调用 <code>__loader_dlopen</code></b><span class="subline">dlopen("/proc/self/fd/N", RTLD_LAZY, libc-&gt;close) + dlsym</span></button></li>
+                  <li><button type="button" class="step-btn"><b>9. 接收 <code>agent_ctrlfd</code>，进入 <code>frida_agent_main()</code></b><span class="subline">READY / ACK 握手 → socket:&lt;fd&gt; 升级为 P2P D-Bus 会话</span></button></li>
+                  <li class="step-token" id="step-token" aria-hidden="true" hidden></li>
+                </ol>
+              </div>
+
+              <aside class="board-state" aria-label="实时进程与寄存器状态">
+                <h3 class="board-col-title">实时状态面板（ARM64 Android）</h3>
+
+                <div class="state-box" id="box-srv">
+                  <div class="state-box-head"><span><code>frida-server</code> / LinuxHelperBackend</span><span id="srv-badge">待命</span></div>
+                  <dl>
+                    <div id="st-srv-action"><dt>当前动作</dt><dd></dd></div>
+                    <div id="st-srv-chan"><dt>控制通道</dt><dd></dd></div>
+                  </dl>
+                </div>
+
+                <div class="state-box" id="box-regs">
+                  <div class="state-box-head"><span>目标 App 主线程（ARM64 寄存器）</span><span id="regs-badge">正常运行</span></div>
+                  <dl>
+                    <div id="st-reg-state"><dt>ptrace 状态</dt><dd></dd></div>
+                    <div id="st-reg-pc"><dt>PC / LR</dt><dd></dd></div>
+                    <div id="st-reg-x0"><dt>X0 (参数/返回)</dt><dd></dd></div>
+                  </dl>
+                </div>
+
+                <div class="state-box" id="box-mem">
+                  <div class="state-box-head"><span>目标 App 地址空间与后台线程</span><span id="mem-badge">未注入</span></div>
+                  <dl>
+                    <div id="st-mem-rwx"><dt>RWX 区域</dt><dd></dd></div>
+                    <div id="st-mem-worker"><dt>Worker / Agent</dt><dd></dd></div>
+                  </dl>
+                </div>
+              </aside>
+            </div>
+
+            <div class="board-annotation" aria-live="polite" aria-atomic="true">
+              <h3 id="ann-title"></h3>
+              <p id="ann-text"></p>
+              <pre class="board-code"><code id="ann-code"></code></pre>
+              <div class="board-refs" id="ann-refs"></div>
+            </div>
+          </section>
+        </section>
+
+        <!-- ==================== 03 SOURCE DEEP DIVE ==================== -->
+        <section id="source-deep" class="chapter">
+          <p class="chapter-kicker">03 / Line-by-Line Source Walkthrough</p>
+          <h2>逐行源码拆解：从 <code>perform_attach_to()</code> 到 <code>frida_agent_main()</code></h2>
+          <p class="lead">下面全部代码片段与行号均直接取自 <code>frida/frida-core</code> 提交 <code>78ff6e5b</code>（Frida <code>16.4.7</code>）。每一段都会先交代“上一层怎么交接过来”，再看关键行，最后指向下一层接续点。</p>
+
+          <!-- 3.1 -->
+          <h3 id="s-entry">3.1 入口接缝：<code>perform_attach_to()</code> 与 <code>memfd</code> 备弹</h3>
+          <p>上一篇我们追到电脑端发来 <code>attach(pid)</code> 请求，手机上的 <code>frida-server</code> 最终进入 <code>linux-host-session.vala</code> 的 <code>perform_attach_to()</code>。它只做两件事：<strong>把 <code>agent</code> 资源注入目标 PID</strong>（指定入口符号 <code>"frida_agent_main"</code> 并开启 <code>CONTROL_CHANNEL</code> 标志），然后立刻向 <code>linjector</code> 索要代表控制通道的 <code>IOStream</code>——后面整个 D-Bus 会话就跑在这条流上。</p>
+
+          <figure class="source-excerpt">
+            <div class="source-filebar">
+              <strong><code>linux-host-session.vala</code></strong>
+              <span class="source-ranges"><a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L426-L448">426–448 行</a></span>
+            </div>
+            <div class="source-metadata"><span>frida/frida-core · 78ff6e5b</span><code>src/linux/linux-host-session.vala</code></div>
+            <div class="source-context"><strong>所在方法</strong><code>LinuxHostSession.perform_attach_to()</code></div>
+            <pre><code> 426 │ protected override async Future&lt;IOStream&gt; perform_attach_to (uint pid, HashTable&lt;string, Variant&gt; options,
+ 427 │         Cancellable? cancellable, out Object? transport) throws Error, IOError {
+ 428 │     uint id;
+<span class="source-note"><span class="source-note-label">注释</span><span>指定加载 agent.so 后要通过 dlsym 查找并执行的 C 入口函数名。</span></span> 429 │     string entrypoint = "frida_agent_main";
+ 430 │     string parameters = make_agent_parameters (pid, "", options);
+<span class="source-note"><span class="source-note-label">注释</span><span>要求注入器同时为 agent 准备一条用于后续 D-Bus 通信的控制通道 socketpair。</span></span> 431 │     AgentFeatures features = CONTROL_CHANNEL;
+ 432 │     var linjector = (Linjector) injector;
+ 433 │ #if HAVE_EMBEDDED_ASSETS
+<span class="source-note"><span class="source-note-label">注释</span><span>官方发布的 frida-server 默认把 agent.so 内嵌在二进制资源里，走资源注入路径。</span></span> 434 │     id = yield linjector.inject_library_resource (pid, agent, entrypoint, parameters, features, cancellable);
+ 435 │ #else
+ 436 │     id = yield linjector.inject_library_file_with_template (pid, PathTemplate (Config.FRIDA_AGENT_PATH), entrypoint,
+ 437 │         parameters, features, cancellable);
+ 438 │ #endif
+ 439 │     injectee_by_pid[pid] = id;
+ 440 │
+ 441 │     var stream_request = new Promise&lt;IOStream&gt; ();
+<span class="source-note"><span class="source-note-label">注释</span><span>注入成功后取出控制通道 IOStream，交回上层 BaseDBusHostSession 建立 AgentSession。</span></span> 442 │     IOStream stream = yield linjector.request_control_channel (id, cancellable);
+ 443 │     stream_request.resolve (stream);
+ 444 │     ...
+ 447 │     return stream_request.future;
+ 448 │ }</code></pre>
+            <figcaption class="source-summary">服务端附加入口：触发资源注入并取回与 agent 直连的 IOStream</figcaption>
+          </figure>
+
+          <p>紧接着进入 <code>linjector.vala</code> 的 <code>inject_library_resource()</code>。注意第 86–95 行：只要 Linux 内核支持 <strong><code>memfd_create</code></strong>（现代 Android 内核普遍支持），Frida <strong>根本不会把 <code>frida-agent-64.so</code> 解压写到磁盘</strong>，而是直接拿一个匿名内存文件描述符（<code>resource.get_memfd()</code>），连同目标 PID、入口名一起传给 <code>helper.inject_library()</code>。只有老内核不支持 <code>memfd</code> 时才回退到临时目录文件。</p>
+
+          <figure class="source-excerpt">
+            <div class="source-filebar">
+              <strong><code>linjector.vala</code></strong>
+              <span class="source-ranges"><a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linjector.vala#L84-L110">84–110 行</a></span>
+            </div>
+            <div class="source-metadata"><span>frida/frida-core · 78ff6e5b</span><code>src/linux/linjector.vala</code></div>
+            <div class="source-context"><strong>所在方法</strong><code>Linjector.inject_library_resource()</code> · <code>Linjector.inject_library_fd()</code></div>
+            <pre><code>  84 │ public async uint inject_library_resource (uint pid, AgentDescriptor agent, string entrypoint, string data,
+  85 │         AgentFeatures features, Cancellable? cancellable) throws Error, IOError {
+<span class="source-note"><span class="source-note-label">注释</span><span>优先走 memfd：按目标进程的架构（32/64 位）挑出对应的内嵌 agent 资源并转为匿名内存 FD。</span></span>  86 │     if (MemoryFileDescriptor.is_supported ()) {
+  87 │         unowned string arch_name = arch_name_from_pid (pid);
+  88 │         string name = agent.name_template.expand (arch_name);
+  89 │         AgentResource? resource = agent.resources.first_match (r =&gt; r.name == name);
+     …
+  94 │         return yield inject_library_fd (pid, resource.get_memfd (), entrypoint, data, features, cancellable);
+  95 │     }
+  96 │
+<span class="source-note"><span class="source-note-label">注释</span><span>不支持 memfd 的老内核才回退到磁盘临时目录。</span></span>  97 │     ensure_tempdir_prepared ();
+  98 │     return yield inject_library_file_with_template (pid, agent.get_path_template (), entrypoint, data, features,
+  99 │         cancellable);
+ 100 │ }
+ 101 │
+ 102 │ public async uint inject_library_fd (uint pid, UnixInputStream library_so, string entrypoint, string data,
+ 103 │         AgentFeatures features, Cancellable? cancellable) throws Error, IOError {
+ 104 │     uint id = next_injectee_id++;
+<span class="source-note"><span class="source-note-label">注释</span><span>交给 LinuxHelper（同架构直接在进程内执行，跨 32/64 位架构时由对应位数的 helper 进程执行）。</span></span> 105 │     yield helper.inject_library (pid, library_so, entrypoint, data, features, id, cancellable);</code></pre>
+            <figcaption class="source-summary">Linjector 优先通过 memfd 零落盘传递 agent.so 文件描述符</figcaption>
+          </figure>
+
+          <!-- 3.2 -->
+          <h3 id="s-remotecall">3.2 <code>ptrace</code> 劫持与 <code>RemoteCall</code>：假返回地址 <code>0x320</code> 的妙用</h3>
+          <p>进入 <code>frida-helper-backend.vala</code> 后，<code>InjectTask</code> 打开一个 <code>InjectSession</code>（继承自 <code>SeizeSession</code>）。注意两个非常工程化的细节：</p>
+          <ol>
+            <li><strong>优先使用 <code>PTRACE_SEIZE</code> + <code>PTRACE_INTERRUPT</code>（Linux 3.4+）</strong>：相比老式的 <code>PTRACE_ATTACH</code>（它会直接往目标发 <code>SIGSTOP</code>，可能被 App 信号处理器或异常状态干扰），<code>SEIZE</code> 可以静默接管进程，再配合 <code>INTERRUPT</code> 干净地把目标线程停下来，并用 <code>PTRACE_GETREGSET</code> 备份完整的通用寄存器与浮点寄存器（<code>saved_registers</code>）。</li>
+            <li><strong>怎样让目标线程执行完一个函数后精准把控制权交还给 <code>frida-server</code>？</strong> 看下面 <code>RemoteCall::execute()</code> 的 ARM64 实现：它把函数参数依次放进 <code>x0..x5</code>，把 <code>PC</code> 改成目标函数地址，然后把返回地址寄存器 <strong><code>LR (x30)</code> 设成一个必然触发段错误的非法地址 <code>DUMMY_RETURN_ADDRESS = 0x320</code></strong>！等目标函数执行到 <code>RET</code> 跳去 <code>0x320</code> 时，CPU 立刻触发 <code>SIGSEGV</code> 并被 <code>ptrace</code> 截获——<code>frida-server</code> 只要检查停下时的 <code>PC == 0x320</code>，就知道函数正常返回了，立刻从 <code>x0</code> 读走返回值，并把之前保存的 <code>saved_registers</code> 写回去，仿佛什么都没发生过！</li>
+          </ol>
+
+          <figure class="source-excerpt">
+            <div class="source-filebar">
+              <strong><code>frida-helper-backend.vala</code></strong>
+              <span class="source-ranges">
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L835">835 行</a>
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L1864-L1892">1864–1892 行</a>
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L2538-L2614">2538–2614 行</a>
+              </span>
+            </div>
+            <div class="source-metadata"><span>frida/frida-core · 78ff6e5b</span><code>src/linux/frida-helper-backend.vala</code></div>
+            <div class="source-context"><strong>所在类</strong><code>SeizeSession</code> · <code>RemoteCall.execute()</code>（ARM64 分支）</div>
+            <pre><code> 835 │ private const size_t DUMMY_RETURN_ADDRESS = 0x320;
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>Linux 3.4+ 优先用 PTRACE_SEIZE + PTRACE_INTERRUPT 静默接管并暂停目标线程。</span></span>1864 │ if (seize_supported) {
+1865 │     req = SEIZE;
+1866 │     res = _ptrace (req, tid, null, (void *) options);
+1867 │ } else {
+1868 │     req = ATTACH;
+1869 │     res = _ptrace (req, tid);
+1870 │ }
+     …
+1886 │ if (seize_supported) {
+1887 │     ptrace (INTERRUPT, tid);
+     …
+2538 │ #elif ARM64
+<span class="source-note"><span class="source-note-label">注释</span><span>按 ARM64 调用约定将参数写入 x0..x5，把返回地址 LR 设为故意触发 SIGSEGV 的 0x320。</span></span>2539 │ uint i = 0;
+2540 │ foreach (uint64 arg in args)
+2541 │     regs.x[i++] = arg;
+2542 │
+2543 │ regs.lr = DUMMY_RETURN_ADDRESS;
+     …
+2576 │ regs.program_counter = target_address;
+     …
+2580 │ session.set_regs (regs);
+2581 │ bool restored = false;
+2582 │ try {
+<span class="source-note"><span class="source-note-label">注释</span><span>放行目标线程执行远程函数，等待函数 RET 跳到 0x320 触发 SIGSEGV 后拦下。</span></span>2583 │     session.resume ();
+2584 │     sig = yield session.wait_for_signals ({ SEGV, STOP }, cancellable);
+2585 │
+2586 │     session.get_regs (&amp;result_regs);
+2587 │
+2588 │     restored = true;
+<span class="source-note"><span class="source-note-label">注释</span><span>读取完结果寄存器后，立刻还原被劫持前保存的原始寄存器现场。</span></span>2589 │     session.set_regs (session.saved_registers);
+2590 │ } finally { ... }
+2599 │ RemoteCallStatus status = (result_regs.program_counter == DUMMY_RETURN_ADDRESS)
+2600 │     ? RemoteCallStatus.COMPLETED
+2601 │     : RemoteCallStatus.RAISED_SIGNAL;
+     …
+2612 │ #elif ARM64
+<span class="source-note"><span class="source-note-label">注释</span><span>只要停在 0x320 就说明远程调用成功返回，ARM64 返回值就在 x0 中。</span></span>2613 │ return_value = result_regs.x[0];</code></pre>
+            <figcaption class="source-summary">ARM64 RemoteCall：借假返回地址 0x320 触发可控 SIGSEGV 实现远程函数调用与现场还原</figcaption>
+          </figure>
+
+          <div class="callout">
+            <p><strong>怎么先在目标进程里拿到第一块能写代码的 RWX 内存？</strong>（<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L1082-L1122">frida-helper-backend.vala L1082–1122</a>）</p>
+            <p>① <strong>常规快路径（Android 绝大多数情况）</strong>：<code>frida-server</code> 查 <code>/proc/&lt;pid&gt;/maps</code> 发现目标 App 映射的是和自己同一份系统 <code>libc.so</code>，直接用「目标 <code>libc</code> 基址 + 本机 <code>mmap</code> 偏移」算出 <code>remote_mmap</code>，通过一次 <code>RemoteCall</code> 在目标进程里调 <code>mmap(RWX)</code> 拿到 <code>allocation_base</code>。</p>
+            <p>② <strong>兜底冷路径（<code>ProcessCodeSwapScope</code>，L2254–2291）</strong>：如果目标进程与服务端用的不是同一份 <code>libc</code>（例如容器/静态链接程序），Frida 会先用 <code>ThreadSuspendScope</code> 冻结目标进程的所有其他线程，借用目标进程某段 <code>r-x</code> 代码页临时覆盖写入 <code>bootstrapper</code>，让 <code>bootstrapper</code> 自己用系统调用 <code>mmap</code> 申请 RWX 内存，然后再把原代码页原样写回并恢复所有线程！</p>
+          </div>
+
+          <!-- 3.3 -->
+          <h3 id="s-bootstrap">3.3 阶段一 <code>bootstrapper.c</code>：不靠 libc 摸清目标进程全部关键函数</h3>
+          <p>拿到目标进程里的一块 RWX 内存（<code>allocation_base</code>）后，<code>frida-server</code> 把预先编译好的无 libc 机器码 <code>bootstrapper-arm64.bin</code> 写进去，并在目标线程栈上留出 <code>FridaBootstrapContext</code> 与 <code>FridaLibcApi</code> 结构体空间，通过 <code>RemoteCall</code> 调用入口函数 <code>frida_bootstrap(ctx)</code>。</p>
+
+          <figure class="source-excerpt">
+            <div class="source-filebar">
+              <strong><code>helpers/bootstrapper.c</code></strong>
+              <span class="source-ranges">
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/helpers/bootstrapper.c#L150-L191">150–191 行</a>
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/helpers/bootstrapper.c#L315-L345">315–345 行</a>
+              </span>
+            </div>
+            <div class="source-metadata"><span>frida/frida-core · 78ff6e5b</span><code>src/linux/helpers/bootstrapper.c</code></div>
+            <div class="source-context"><strong>所在函数</strong><code>frida_bootstrap()</code> · <code>frida_collect_android_linker_symbol()</code></div>
+            <pre><code> 150 │ __attribute__ ((section (".text.entrypoint")))
+ 152 │ FridaBootstrapStatus
+ 153 │ frida_bootstrap (FridaBootstrapContext * ctx)
+ 154 │ {
+ 155 │   FridaLibcApi * libc = ctx-&gt;libc;
+ 156 │   FridaProcessLayout process;
+ 157 │
+<span class="source-note"><span class="source-note-label">注释</span><span>冷路径：若尚未分配 RWX 内存，bootstrapper 自己发 mmap 系统调用申请一块后直接返回。</span></span> 158 │   if (ctx-&gt;allocation_base == NULL)
+ 159 │   {
+ 160 │     ctx-&gt;allocation_base = mmap (NULL, ctx-&gt;allocation_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+ 161 │     return (ctx-&gt;allocation_base == MAP_FAILED) ? FRIDA_BOOTSTRAP_ALLOCATION_ERROR : FRIDA_BOOTSTRAP_ALLOCATION_SUCCESS;
+ 162 │   }
+ 163 │
+<span class="source-note"><span class="source-note-label">注释</span><span>读 /proc/self/auxv 与动态链接器 r_debug 链表，定位目标进程的 linker64 与 libc.so 基址。</span></span> 166 │   if (!frida_probe_process (ctx-&gt;page_size, &amp;process))
+ 167 │     return FRIDA_BOOTSTRAP_AUXV_NOT_FOUND;
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>解析目标 libc 与 Android linker 的 ELF 符号表，填满 17 个函数指针（mmap/pthread_create/dlopen 等）。</span></span> 182 │   if (!frida_resolve_libc_apis (&amp;process, libc))
+ 183 │     return FRIDA_BOOTSTRAP_LIBC_UNSUPPORTED;
+ 184 │
+ 185 │   ctx-&gt;ctrlfds[0] = -1;
+ 186 │   ctx-&gt;ctrlfds[1] = -1;
+<span class="source-note"><span class="source-note-label">注释</span><span>如果内核支持 pidfd_getfd，直接在目标进程里 socketpair() 建一对控制通道 FD。</span></span> 187 │   if (ctx-&gt;enable_ctrlfds)
+ 188 │     frida_socketpair (AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, ctx-&gt;ctrlfds);
+ 189 │
+ 190 │   return FRIDA_BOOTSTRAP_SUCCESS;
+ 191 │ }
+     …
+ 315 │ frida_collect_android_linker_symbol (const FridaElfExportDetails * details, void * user_data)
+ 316 │ {
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>Android 8+ 导出 __loader_dlopen 等符号；Android 7/旧版则从 linker 磁盘符号表找 __dl__Z8__dlopen...。</span></span> 331 │   FRIDA_TRY_COLLECT (dlopen, "__loader_dlopen");
+ 332 │   FRIDA_TRY_COLLECT (dlclose, "__loader_dlclose");
+ 333 │   FRIDA_TRY_COLLECT (dlsym, "__loader_dlsym");
+ 334 │   FRIDA_TRY_COLLECT (dlerror, "__loader_dlerror");
+ 335 │
+ 336 │   FRIDA_TRY_COLLECT (dlopen, "__dl__Z8__dlopenPKciPKv");
+ 337 │   FRIDA_TRY_COLLECT (dlclose, "__dl__Z9__dlclosePv");
+ 338 │   FRIDA_TRY_COLLECT (dlsym, "__dl__Z7__dlsymPvPKcPKv");
+ 339 │   FRIDA_TRY_COLLECT (dlerror, "__dl__Z9__dlerrorv");</code></pre>
+            <figcaption class="source-summary">阶段一 bootstrapper：不依赖任何外部库，在目标进程内部解析出 libc 与 Android linker 的真实函数地址</figcaption>
+          </figure>
+
+          <p><code>frida_bootstrap()</code> 返回后，<code>frida-server</code> 从目标栈上把填好的 <code>FridaBootstrapContext</code> 和 <code>FridaLibcApi</code> 读回本地。这里还有一个非常隐蔽的跨内核优化（<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L1246-L1279">frida-helper-backend.vala L1246–1279</a>）：</p>
+          <ul>
+            <li><strong>Linux 5.6+（现代 Android 内核）</strong>：<code>bootstrapper</code> 在目标进程里建好了 <code>ctrlfds[0..1]</code>，<code>frida-server</code> 直接调用系统调用 <strong><code>pidfd_open(pid)</code> + <code>pidfd_getfd(ctrlfds[0])</code></strong>，凭空把目标进程里的 <code>ctrlfds[0]</code> 复制一份到自己进程里！于是两个进程之间瞬间就有一条完全匿名的 Unix Socket 控制通道，<strong>连 abstract socket 名称都不会出现在 <code>/proc/net/unix</code> 里</strong>。</li>
+            <li><strong>旧内核兜底</strong>：如果不支持 <code>pidfd_getfd</code>，<code>frida-server</code> 才监听一个 abstract Unix socket（<code>/frida-&lt;随机UUID&gt;</code>），等下一阶段的 <code>loader</code> 主动连上来。</li>
+          </ul>
+
+          <!-- 3.4 -->
+          <h3 id="s-loader">3.4 阶段二 <code>loader.c</code>：秒退主线程 + <code>SCM_RIGHTS</code> 收 FD + 伪装 <code>libc-&gt;close</code></h3>
+          <p>接下来 <code>InjectSession.inject()</code>（<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L908-L925">L908–925</a>）把阶段二的 <code>loader-arm64.bin</code>、<code>FridaLoaderContext</code>、<code>FridaLibcApi</code> 以及 <code>"frida_agent_main"</code> 字符串覆盖写进刚才那块 RWX 内存，并用最后一次 <code>RemoteCall</code> 调用 <code>frida_load(ctx)</code>。</p>
+          <p>看下面 <code>loader.c</code> 第 61–64 行——这就是整个注入最优雅的地方：<strong>被 <code>ptrace</code> 劫持的 App 主线程只执行了 1 行 <code>pthread_create</code> 就立刻返回</strong>，随后 <code>frida-server</code> 还原主线程寄存器并结束 <code>ptrace</code>。真正的 <code>dlopen</code> 和 <code>frida_agent_main</code> 全部在新建的后台 <code>worker</code> 线程（<code>frida_main</code>）里安静执行！</p>
+
+          <figure class="source-excerpt">
+            <div class="source-filebar">
+              <strong><code>helpers/loader.c</code></strong>
+              <span class="source-ranges">
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/helpers/loader.c#L58-L64">58–64 行</a>
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/helpers/loader.c#L105-L144">105–144 行</a>
+              </span>
+            </div>
+            <div class="source-metadata"><span>frida/frida-core · 78ff6e5b</span><code>src/linux/helpers/loader.c</code></div>
+            <div class="source-context"><strong>所在函数</strong><code>frida_load()</code> · <code>frida_main()</code></div>
+            <pre><code>  58 │ __attribute__ ((section (".text.entrypoint")))
+  60 │ void
+  61 │ frida_load (FridaLoaderContext * ctx)
+  62 │ {
+<span class="source-note"><span class="source-note-label">注释</span><span>被 ptrace 劫持的线程只做这一件事：拉起后台 worker 线程后立刻返回，绝不在 ptrace 期间调 dlopen！</span></span>  63 │   ctx-&gt;libc-&gt;pthread_create (&amp;ctx-&gt;worker, NULL, frida_main, ctx);
+  64 │ }
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>以下运行在新建的 worker 线程中（此前已通过 ctrlfd 发完 HELLO 握手）。</span></span> 105 │   if (ctx-&gt;agent_handle == NULL)
+ 106 │   {
+ 107 │     char agent_path[32];
+<span class="source-note"><span class="source-note-label">注释</span><span>关键细节！把 caller_addr 伪装成 libc.so 中的 close() 地址，借系统默认 namespace 绕过 Android 7+ linker 限制。</span></span> 108 │     const void * pretend_caller_addr = libc-&gt;close;
+ 109 │
+<span class="source-note"><span class="source-note-label">注释</span><span>通过 Unix Socket SCM_RIGHTS 接收 frida-server 传来的 agent.so 文件描述符（通常是 memfd）。</span></span> 110 │     agent_codefd = frida_receive_fd (ctrlfd, libc);
+ 111 │     if (agent_codefd == -1)
+ 112 │       goto beach;
+ 113 │
+<span class="source-note"><span class="source-note-label">注释</span><span>把收到的 memfd 拼成 /proc/self/fd/&lt;N&gt; 路径，交给 Android linker 的 __loader_dlopen 加载进当前进程！</span></span> 114 │     libc-&gt;sprintf (agent_path, "/proc/self/fd/%d", agent_codefd);
+ 115 │
+ 116 │     ctx-&gt;agent_handle = libc-&gt;dlopen (agent_path, libc-&gt;dlopen_flags, pretend_caller_addr);
+ 117 │     if (ctx-&gt;agent_handle == NULL)
+ 118 │       goto dlopen_failed;
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>找到 frida-agent.so 导出的 frida_agent_main 入口函数。</span></span> 126 │     ctx-&gt;agent_entrypoint_impl = libc-&gt;dlsym (ctx-&gt;agent_handle, ctx-&gt;agent_entrypoint, pretend_caller_addr);
+ 127 │     if (ctx-&gt;agent_entrypoint_impl == NULL)
+ 128 │       goto dlsym_failed;
+ 129 │   }
+ 130 │
+<span class="source-note"><span class="source-note-label">注释</span><span>再通过 SCM_RIGHTS 接收第二枚 FD：专用于后续 P2P D-Bus 通信的 agent_ctrlfd。</span></span> 131 │   agent_ctrlfd = frida_receive_fd (ctrlfd, libc);
+ 132 │   if (agent_ctrlfd != -1)
+ 133 │     frida_enable_close_on_exec (agent_ctrlfd, libc);
+ 134 │
+<span class="source-note"><span class="source-note-label">注释</span><span>向 frida-server 报告 READY 并等服务端回 ACK，确认两边彻底同步后正式移交控制权。</span></span> 135 │   if (!frida_send_ready (ctrlfd, libc))
+ 136 │     goto beach;
+ 137 │   if (!frida_receive_ack (ctrlfd, libc))
+ 138 │     goto beach;
+ 139 │
+ 140 │   injector_state.frida_ctrlfd = ctrlfd;
+ 141 │   injector_state.agent_ctrlfd = agent_ctrlfd;
+ 142 │
+<span class="source-note"><span class="source-note-label">注释</span><span>正式踏入 frida-agent.so 的 frida_agent_main()，注入阶段圆满结束！</span></span> 143 │   ctx-&gt;agent_entrypoint_impl (ctx-&gt;agent_data, &amp;unload_policy, &amp;injector_state);</code></pre>
+            <figcaption class="source-summary">阶段二 loader：秒退劫持线程，后台收双 FD、伪装 libc-&gt;close 加载 agent.so 并进入 frida_agent_main</figcaption>
+          </figure>
+
+          <div class="callout teal">
+            <p><strong>对照服务端发 FD 的另一端：</strong>就在 <code>loader</code> 执行第 110 行与第 131 行的 <code>frida_receive_fd()</code> 时，<code>frida-server</code> 侧的 <code>RemoteAgent.start()</code>（<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L1513-L1557">frida-helper-backend.vala L1513–1557</a>）正在按完全相同的顺序调两次 <code>frida_ctrl.send_fd()</code>：第一枚发的是 <code>spec.library_so.get_fd()</code>（<code>agent.so</code> 的 <code>memfd</code>），第二枚发的是刚建好的 <code>agent_ctrl</code> <code>socketpair</code> 的对端（<code>agent_ctrlfd_for_peer</code>）。</p>
+          </div>
+
+          <!-- 3.5 -->
+          <h3 id="s-agent">3.5 落地收尾：<code>frida_agent_main()</code> 点亮 D-Bus 会话与内部线程</h3>
+          <p><code>loader.c</code> 第 143 行调用 <code>frida_agent_main()</code>，对应 <code>lib/agent/agent.vala</code> 里的 <code>Frida.Agent.main()</code> → <code>Runner.create_and_run()</code>。它把收到的 <code>agent_ctrlfd</code> 拼成传输地址 <code>"socket:&lt;fd&gt;..."</code>，顺手把自身代码内存区加入 <code>Gum.Cloak</code>，随后在 GLib <code>MainLoop</code> 里建好 <code>DBusConnection</code> 并激活 GumJS 调度线程——到这里，就和我们上一篇 <a href="frida-dbus-guide.html">《Frida 里的 D-Bus 到底是什么？》</a> 与第一篇 <a href="frida-android-guide-v2.html">《Frida Android 入门与源码仓库拆解》</a> 彻底严丝合缝地接上了！</p>
+
+          <figure class="source-excerpt">
+            <div class="source-filebar">
+              <strong><code>lib/agent/agent.vala</code></strong>
+              <span class="source-ranges">
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/agent.vala#L129-L164">129–164 行</a>
+                <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/agent.vala#L329-L341">329–341 行</a>
+              </span>
+            </div>
+            <div class="source-metadata"><span>frida/frida-core · 78ff6e5b</span><code>lib/agent/agent.vala</code></div>
+            <div class="source-context"><strong>所在方法</strong><code>Runner.create_and_run()</code> · <code>Runner.start()</code></div>
+            <pre><code> 129 │ if (cached_agent_path == null) {
+<span class="source-note"><span class="source-note-label">注释</span><span>识别 frida-agent.so 自己在内存里的映射范围，登记到 Gum.Cloak（用于让 Frida 自身的内存枚举避开自己）。</span></span> 130 │     cached_agent_range = detect_own_range_and_path (mapped_range, out cached_agent_path);
+ 131 │     Gum.Cloak.add_range (cached_agent_range);
+ 132 │ }
+     …
+ 144 │ #if LINUX
+ 145 │ var linjector_state = (LinuxInjectorState *) opaque_injector_state;
+ 146 │ string? agent_parameters_with_transport_uri = null;
+ 147 │ if (linjector_state != null) {
+<span class="source-note"><span class="source-note-label">注释</span><span>取出 loader 传进来的 agent_ctrlfd，挪到高号 FD 槽位防碰撞，并拼成 "socket:&lt;fd&gt;" 传输 URI。</span></span> 148 │     int agent_ctrlfd = linjector_state-&gt;agent_ctrlfd;
+ 149 │     linjector_state-&gt;agent_ctrlfd = -1;
+ 150 │     fdt_padder.move_descriptor_if_needed (ref agent_ctrlfd);
+ 151 │     agent_parameters_with_transport_uri = "socket:%d%s".printf (agent_ctrlfd, agent_parameters);
+ 152 │     agent_parameters = agent_parameters_with_transport_uri;
+ 153 │ }
+ 154 │ #endif
+     …
+<span class="source-note"><span class="source-note-label">注释</span><span>用 socket:&lt;fd&gt; 建立与 frida-server 直连的 P2P D-Bus 连接，再预热 GumJS 调度线程（gum-js-loop）。</span></span> 330 │ yield setup_connection_with_transport_uri (transport_uri);
+     …
+ 337 │ Gum.ScriptBackend.get_scheduler ().push_job_on_js_thread (Priority.DEFAULT, () =&gt; {
+ 338 │     schedule_idle (start.callback);
+ 339 │ });</code></pre>
+            <figcaption class="source-summary">agent 落地：接管 agent_ctrlfd 升级为 P2P D-Bus 会话，并初始化 GumJS 执行线程</figcaption>
+          </figure>
+        </section>
+
+        <!-- ==================== 04 SEQUENCE DIAGRAM ==================== -->
+        <section id="sequence" class="chapter">
+          <p class="chapter-kicker">04 / End-to-End Handshake Sequence</p>
+          <h2>完整时序图：两条通道与四个执行体如何接力</h2>
+          <p class="lead">注意区分注入过程中的<strong>两对 Unix Socket</strong>：<code>ctrlfds</code>（<code>frida_ctrl</code>）只负责 <code>loader</code> 与服务端之间的注入期握手和传 FD；<code>agent_ctrl</code> 才是 <code>frida-agent.so</code> 加载后长期跑 D-Bus 协议的主通信通道。</p>
+
+          <figure class="timing">
+            <figcaption>时序图 · Frida 16.4.7 Linux/Android 两阶段注入与握手全流程</figcaption>
+            <div class="timing-scroll" role="region" tabindex="0" aria-label="Frida 两阶段注入时序图">
+              <div class="lifelines" style="--lanes: 4">
+                <div class="lane-row lane-head" aria-hidden="true">
+                  <span>frida-server<br>(HelperBackend)</span>
+                  <span>App 主线程<br>(ptrace 暂停窗口)</span>
+                  <span>App Worker 线程<br>(loader / frida_main)</span>
+                  <span>frida-agent.so<br>(frida_agent_main)</span>
+                </div>
+
+                <div class="lane-row"><div class="lane-divider">阶段 A · ptrace 劫持与阶段一 bootstrapper（主线程短暂暂停）</div></div>
+
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i>
+                  <div class="msg forward" style="grid-column:1/3;--edge:25%"><code>PTRACE_SEIZE</code> + <code>INTERRUPT</code> + 备份寄存器</div>
+                </div>
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i>
+                  <div class="msg forward" style="grid-column:1/3;--edge:25%"><code>RemoteCall(mmap)</code> → 写并执行 <code>bootstrapper</code></div>
+                </div>
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i>
+                  <div class="msg back" style="grid-column:1/3;--edge:25%">返回 <code>FridaLibcApi</code>（含 <code>__loader_dlopen</code>）与 <code>ctrlfds</code></div>
+                </div>
+
+                <div class="lane-row"><div class="lane-divider">阶段 B · 写入 loader、拉起 worker 线程并立刻释放主线程</div></div>
+
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i>
+                  <div class="msg forward" style="grid-column:1/3;--edge:25%"><code>pidfd_getfd(ctrlfds[0])</code> + 写 <code>loader.bin</code> + 调 <code>frida_load()</code></div>
+                </div>
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i>
+                  <div class="msg forward" style="grid-column:2/4;--edge:25%"><code>pthread_create(frida_main)</code> 拉起后台线程</div>
+                </div>
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i>
+                  <div class="msg back" style="grid-column:1/3;--edge:25%">命中 <code>LR=0x320</code> → 还原原寄存器并 <code>PTRACE_DETACH</code>（App 恢复运行）</div>
+                </div>
+
+                <div class="lane-row"><div class="lane-divider">阶段 C · 后台线程跨进程收双 FD、加载 agent.so 并进入 D-Bus</div></div>
+
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i>
+                  <div class="msg back" style="grid-column:1/4;--edge:16.7%">经 <code>ctrlfds</code> 发 <code>HELLO(tid)</code> 握手</div>
+                </div>
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i>
+                  <div class="msg forward" style="grid-column:1/4;--edge:16.7%"><code>SCM_RIGHTS</code> 依次送出 <code>agent_codefd</code>（memfd）与 <code>agent_ctrlfd</code></div>
+                </div>
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i>
+                  <div class="msg forward" style="grid-column:3/5;--edge:25%">伪装 <code>libc-&gt;close</code> 调 <code>__loader_dlopen("/proc/self/fd/N")</code> + <code>dlsym</code></div>
+                </div>
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i>
+                  <div class="msg back" style="grid-column:1/4;--edge:16.7%"><code>READY</code> ↔ <code>ACK</code> 握手同步</div>
+                </div>
+                <div class="lane-row">
+                  <i style="grid-column:1"></i><i style="grid-column:2"></i><i style="grid-column:3"></i><i style="grid-column:4"></i>
+                  <div class="msg forward" style="grid-column:3/5;--edge:25%">调用 <code>frida_agent_main(socket:&lt;agent_ctrlfd&gt;)</code> → 建立 P2P D-Bus</div>
+                </div>
+              </div>
+            </div>
+            <p class="timing-foot">App 主线程只在阶段 A/B 被短暂暂停；耗时最长的 <code>dlopen</code>、<code>agent</code> 初始化与脚本执行全部在主线程恢复之后于独立线程里完成。</p>
+          </figure>
+        </section>
+
+        <!-- ==================== 05 SPAWN VS ATTACH ==================== -->
+        <section id="spawn-vs-attach" class="chapter">
+          <p class="chapter-kicker">05 / Attach vs Spawn on Android</p>
+          <h2>延伸追问：<code>-N</code>（Attach）和 <code>-f</code>（Spawn）在 Android 上差在哪？</h2>
+          <p class="lead">对于普通 Linux 命令行程序，Frida 做 <code>spawn</code> 很简单——直接 <code>fork()</code> + <code>PTRACE_TRACEME</code> + <code>execve()</code> 把新进程停在入口即可（<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L32-L97">frida-helper-backend.vala L32–97</a>）。<strong>但 Android App 根本不能直接 <code>execve</code>，它们全是由 <code>zygote</code> / <code>zygote64</code>（以及 Android 10+ 的 <code>usap32</code> / <code>usap64</code> 预孵进程池）fork 出来的！</strong></p>
+
+          <p>因此 <code>linux-host-session.vala</code> 专门为 Android 写了一套 <strong><code>RoboLauncher</code></strong>（<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L589-L799">L589–799</a>）：</p>
+          <ol>
+            <li><strong>先往 <code>zygote</code> / <code>zygote64</code> / <code>usap32</code> / <code>usap64</code> 注入 <code>ZygoteAgent</code></strong>（<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L730-L740">L730–740</a>）并开启 child gating，监视它们什么时候 fork 并特化（specialize）出目标 App 子进程。</li>
+            <li><strong>借助注入到 <code>system_server</code> 的 <code>SystemServerAgent</code></strong>，先调用 <code>stop_package()</code> 杀掉旧进程，再调用 <code>start_package()</code> 让 Android AMS 正规拉起该 App（<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L623-L624">L623–624</a>）。</li>
+            <li><strong>在特化完成的瞬间挂起子进程</strong>：<code>ZygoteAgent</code> 捕获到目标包名的新子进程后，<code>RoboLauncher.try_handle_child()</code> 把新 PID 返回给 CLI；此时 App 主线程还停在非常早期（业务 <code>Application.onCreate()</code> 尚未执行），CLI 趁机 <code>attach(pid)</code> 加载你的 <code>hook.js</code>，等脚本装完 Hook 再调用 <code>resume(pid)</code> 放行！</li>
+          </ol>
+
+          <div class="table-wrap">
+            <table class="data" aria-label="Android Attach 与 Spawn 对比">
+              <thead>
+                <tr>
+                  <th scope="col">对比维度</th>
+                  <th scope="col">Attach 模式（<code>frida -U -N 包名</code>）</th>
+                  <th scope="col">Spawn 模式（<code>frida -U -f 包名</code>）</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">目标进程前提</th>
+                  <td>App 必须已经在运行，已有现成 PID</td>
+                  <td>先 <code>stop_package</code> 杀掉旧进程，再由系统重新冷启动</td>
+                </tr>
+                <tr>
+                  <th scope="row">是否注入系统进程</th>
+                  <td>否，只注入目标 App 本身（加上枚举应用时可能按需借助 <code>system_server</code>）</td>
+                  <td><strong>是</strong>，需向 <code>zygote/zygote64/usap*</code> 注入 <code>ZygoteAgent</code>，并由 <code>SystemServerAgent</code> 启停包</td>
+                </tr>
+                <tr>
+                  <th scope="row">脚本介入时机</th>
+                  <td>随时介入，但错过启动早期逻辑（如 <code>JNI_OnLoad</code>、壳解密、早期初始化）</td>
+                  <td>子进程刚特化即挂起，可在 <code>Application.onCreate()</code> 与早期 <code>.so</code> 加载前下钩</td>
+                </tr>
+                <tr>
+                  <th scope="row">底层注入 <code>agent.so</code></th>
+                  <td><code>perform_attach_to()</code> → 本文全套两阶段注入</td>
+                  <td>拿到挂起的新 PID 后，同样走 <code>perform_attach_to()</code> 注入并加载脚本，最后 <code>resume</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- ==================== 06 ARTIFACTS ==================== -->
+        <section id="artifacts" class="chapter">
+          <p class="chapter-kicker">06 / Forensic Footprint</p>
+          <h2>原理反推：一次注入在目标 App 里留下了哪些真实痕迹？</h2>
+          <p class="lead">懂了上面 5 节的源码实现，很多一线逆向与风控文章里列举的“Frida 检测点”就不再是死记硬背的清单，而是上述机制的必然副产物：</p>
+
+          <div class="trace-grid">
+            <article class="trace-card">
+              <h4>1. <code>/proc/pid/maps</code> 里的匿名 RWX 与 <code>memfd</code> 映射</h4>
+              <p>阶段一申请的 <code>allocation_base</code> 是一块匿名 <code>rwxp</code> 内存页；随后 <code>dlopen("/proc/self/fd/N")</code> 加载 <code>memfd</code> 里的 <code>agent.so</code> 后，在 <code>maps</code> 中会留下类似 <code>/memfd:frida-agent-64.so (deleted)</code> 的映射项（老内核无 <code>memfd</code> 时则是临时目录里的 <code>frida-agent-*.so</code>）。</p>
+            </article>
+            <article class="trace-card">
+              <h4>2. <code>/proc/pid/task/*/comm</code> 里的新增线程</h4>
+              <p>阶段二 <code>frida_load()</code> 新建了 <code>worker</code> 线程，进入 <code>frida_agent_main()</code> 后 GLib 与 GumJS 又会拉起 <code>gmain</code>、<code>gdbus</code>、<code>gum-js-loop</code>、<code>pool-frida</code> 等内部线程。虽然 <code>agent.vala</code> 调了 <code>Gum.Cloak</code>，但那是给 Frida 自己 API 过滤用的，外部直接读 <code>/proc</code> 依然可见。</p>
+            </article>
+            <article class="trace-card">
+              <h4>3. <code>/proc/pid/status</code> 的 <code>TracerPid</code> 短暂窗口</h4>
+              <p>从 <code>PTRACE_SEIZE</code> 到阶段二 <code>DETACH</code> 的短短几毫秒内，目标进程内核状态里的 <code>TracerPid</code> 会变成 <code>frida-server</code>（或 <code>frida-helper</code>）的 PID。高频轮询 <code>TracerPid</code> 的保护线程有可能在这个窗口期抓到痕迹。</p>
+            </article>
+            <article class="trace-card">
+              <h4>4. <code>/proc/pid/fd</code>、Unix Socket 与 27042 端口</h4>
+              <p>目标进程内多出了 <code>ctrlfd</code> 与 <code>agent_ctrlfd</code>（指向匿名 Unix Socket）；在不支持 <code>pidfd_getfd</code> 的老内核上，<code>/proc/net/unix</code> 还会短暂出现 <code>@/frida-&lt;uuid&gt;</code>；而设备端常驻的 <code>frida-server</code> 默认监听 <code>27042</code> 并响应 D-Bus <code>AUTH</code>（详见 <a href="frida-dbus-guide.html">D-Bus 专题</a>）。</p>
+            </article>
+          </div>
+        </section>
+
+        <!-- ==================== 07 SOURCES ==================== -->
+        <section id="sources" class="chapter">
+          <p class="chapter-kicker">07 / Source Index &amp; Next</p>
+          <h2>源码索引（固定提交 <code>frida-core @ 78ff6e5b</code>）</h2>
+          <p class="muted">全部链接均已对照 Frida <code>16.4.7</code> 对应提交逐行核验。</p>
+
+          <div class="index-box">
+            <div class="index-group">
+              <h3>服务端入口、资源准备与 Android Spawn</h3>
+              <ul class="index-list">
+                <li><code>src/linux/linux-host-session.vala</code>：<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L426-L448">perform_attach_to（L426–448）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L589-L688">RoboLauncher.spawn / try_handle_child（L589–688）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L730-L799">Zygote / USAP 注入（L730–799）</a></li>
+                <li><code>src/linux/linjector.vala</code>：<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linjector.vala#L84-L114">inject_library_resource / memfd（L84–114）</a></li>
+              </ul>
+            </div>
+
+            <div class="index-group">
+              <h3><code>ptrace</code> 劫持、<code>RemoteCall</code> 与 <code>pidfd_getfd</code> / <code>SCM_RIGHTS</code></h3>
+              <ul class="index-list">
+                <li><code>src/linux/frida-helper-backend.vala</code>：<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L835">DUMMY_RETURN_ADDRESS = 0x320（L835）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L900-L937">InjectSession.inject（L900–937）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L1073-L1207">bootstrap（L1073–1207）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L1241-L1282">establish_connection / pidfd_getfd（L1241–1282）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L1511-L1563">RemoteAgent.start / send_fd（L1511–1563）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L1864-L1920">SeizeSession / PTRACE_SEIZE（L1864–1920）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L2240-L2292">ProcessCodeSwapScope（L2240–2292）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L2538-L2622">ARM64 RemoteCall.execute（L2538–2622）</a></li>
+              </ul>
+            </div>
+
+            <div class="index-group">
+              <h3>目标进程内载荷与 agent 入口</h3>
+              <ul class="index-list">
+                <li><code>src/linux/helpers/inject-context.h</code>：<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/helpers/inject-context.h#L39-L111">BootstrapContext / LoaderContext / LibcApi / 消息枚举（L39–111）</a></li>
+                <li><code>src/linux/helpers/bootstrapper.c</code>：<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/helpers/bootstrapper.c#L150-L191">frida_bootstrap（L150–191）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/helpers/bootstrapper.c#L315-L345">Android linker 符号解析（L315–345）</a></li>
+                <li><code>src/linux/helpers/loader.c</code>：<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/helpers/loader.c#L58-L148">frida_load / frida_main / pretend_caller_addr（L58–148）</a></li>
+                <li><code>lib/agent/agent.vala</code>：<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/agent.vala#L116-L166">Runner.create_and_run（L116–166）</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/agent.vala#L329-L343">建立 D-Bus 与 GumJS 线程（L329–343）</a></li>
+              </ul>
+            </div>
+
+            <div class="index-group">
+              <h3>同系列文档导航</h3>
+              <ul class="index-list">
+                <li><a href="index.html">返回文档总索引（index.html）</a></li>
+                <li><a href="frida-android-guide-v2.html">第一篇：Frida Android 入门与源码仓库拆解</a></li>
+                <li><a href="frida-dbus-guide.html">补充专题：Frida 里的 D-Bus 到底是什么？</a></li>
+                <li><a href="xposed-art-hook-principle.html">对照阅读：Xposed v89 源码解析：ART 方法 Hook 的完整流程</a></li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="next-post">
+            <strong>下一篇预告（第三篇）：</strong> <code>frida-agent.so</code> 已经安全落进目标 App，D-Bus 也已连通，接下来最精彩的一环就是——<strong>在没有修改过 <code>libart.so</code> 的原生 Android 上，<code>frida-java-bridge</code> 里的 <code>ArtMethodMangler</code> 究竟怎么接管 Java 方法，以及它和经典 Xposed v89 的本质差异</strong>。
+          </div>
+
+          <footer class="footer-note">
+            <span>Android Security Notes · Frida Android 系列（第二篇）</span>
+            <span>单文件自包含 HTML · 源码锚点 frida-core @ 78ff6e5b</span>
+          </footer>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // 1. Scroll-Spy across all TOC anchors
+    const tocLinks = [...document.querySelectorAll('#toc a')];
+    const trackedIds = tocLinks
+      .map(link => link.getAttribute('href').replace(/^#/, ''))
+      .filter(Boolean);
+    const sections = trackedIds.map(id => document.getElementById(id)).filter(Boolean);
+
+    function setActiveToc(id) {
+      tocLinks.forEach(link => {
+        const match = link.getAttribute('href') === '#' + id;
+        link.classList.toggle('active', match);
+        if (match) link.setAttribute('aria-current', 'location');
+        else link.removeAttribute('aria-current');
+      });
+    }
+
+    function updateTocFromScroll() {
+      const offset = 120;
+      let current = sections[0];
+      for (const sec of sections) {
+        if (sec.getBoundingClientRect().top <= offset) current = sec;
+      }
+      if (current) setActiveToc(current.id);
+    }
+
+    let scrollTicking = false;
+    window.addEventListener('scroll', () => {
+      if (scrollTicking) return;
+      scrollTicking = true;
+      requestAnimationFrame(() => {
+        updateTocFromScroll();
+        scrollTicking = false;
+      });
+    }, { passive: true });
+    window.addEventListener('hashchange', () => {
+      const id = location.hash.replace(/^#/, '');
+      if (id && trackedIds.includes(id)) setActiveToc(id);
+    });
+    updateTocFromScroll();
+
+    // 2. 9-Step Interactive Injection Walkthrough
+    const frames = [
+      {
+        title: '第 1 步 · perform_attach_to() 准备内嵌 agent.so 的 memfd',
+        text: '收到电脑端 attach(pid) 后，LinuxHostSession 进入 perform_attach_to()。Linjector 优先通过 memfd_create 把对应架构（arm64）的内嵌 frida-agent.so 放进匿名内存文件，无需写盘，随后连同入口名 "frida_agent_main" 交给 LinuxHelperBackend。',
+        code: 'perform_attach_to(pid)\n  → linjector.inject_library_resource() → resource.get_memfd()\n  → helper.inject_library(pid, memfd, "frida_agent_main", ...)',
+        refs: [
+          ['perform_attach_to L426', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L426-L448'],
+          ['Linjector memfd L86', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linjector.vala#L86-L95']
+        ],
+        live: ['box-srv'],
+        changed: ['st-srv-action'],
+        badges: { srv: '准备资源', regs: '正常运行', mem: '未注入' },
+        state: {
+          srvAction: '已创建匿名 memfd（承载 frida-agent-64.so），进入 InjectTask',
+          srvChan: '尚未与目标 App 建立通道',
+          regState: '未被 ptrace 附加，App 正常调度',
+          regPc: 'App 原指令流',
+          regX0: 'App 原寄存器值',
+          memRwx: '无',
+          memWorker: '仅 App 自身线程'
+        }
+      },
+      {
+        title: '第 2 步 · PTRACE_SEIZE + INTERRUPT 静默暂停目标线程并备份寄存器',
+        text: 'InjectSession（继承自 SeizeSession）使用 Linux 3.4+ 的 PTRACE_SEIZE 与 PTRACE_INTERRUPT 静默暂停目标线程（避免直接发送 SIGSTOP 干扰信号状态），再通过 PTRACE_GETREGSET 把完整的通用寄存器与浮点寄存器备份进 saved_registers。',
+        code: 'ptrace(PTRACE_SEIZE, tid) → ptrace(PTRACE_INTERRUPT, tid)\nptrace(PTRACE_GETREGSET, tid, NT_PRSTATUS, &saved_registers)',
+        refs: [
+          ['SeizeSession L1864', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L1864-L1892']
+        ],
+        live: ['box-srv', 'box-regs'],
+        changed: ['st-reg-state'],
+        badges: { srv: '已接管线程', regs: '已暂停并备份', mem: '未注入' },
+        state: {
+          srvAction: '已接管目标线程并保存 saved_registers',
+          srvChan: '尚未建立',
+          regState: 'PTRACE_SEIZE 暂停中（TracerPid = frida-server）',
+          regPc: '已记录原始 PC / LR',
+          regX0: '已记录原始 x0..x30',
+          memRwx: '无',
+          memWorker: '仅 App 自身线程'
+        }
+      },
+      {
+        title: '第 3 步 · RemoteCall 在目标进程开辟 RWX 内存（或冷路径代码页借用）',
+        text: '若目标与服务端共享同一系统 libc，frida-server 计算出目标 remote_mmap 地址，用 RemoteCall（设 PC=mmap, LR=0x320）在目标进程内申请一块 RWX 内存 allocation_base；若 libc 不同，则用 ProcessCodeSwapScope 冻结其他线程，临时借用代码页让 bootstrapper 自己发 mmap 系统调用。',
+        code: 'RemoteCall(target = remote_mmap, args = [NULL, size, RWX, MAP_ANON, -1, 0])\n  → LR = 0x320 触发 SIGSEGV 回收控制权 → x0 返回 allocation_base',
+        refs: [
+          ['bootstrap 分配内存 L1082', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L1082-L1122'],
+          ['ARM64 RemoteCall L2538', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L2538-L2614']
+        ],
+        live: ['box-regs', 'box-mem'],
+        changed: ['st-reg-pc', 'st-reg-x0', 'st-mem-rwx'],
+        badges: { srv: '远程调 mmap', regs: 'RemoteCall 返回', mem: '已辟 RWX 页' },
+        state: {
+          srvAction: '通过 RemoteCall 在目标进程申请 RWX 匿名页',
+          srvChan: '尚未建立',
+          regState: '停在 LR=0x320 处（已还原 saved_registers）',
+          regPc: 'PC = remote_mmap · LR = 0x320',
+          regX0: '返回 allocation_base（RWX 起始地址）',
+          memRwx: '已映射匿名 RWX 区域（待写 bootstrapper）',
+          memWorker: '仅 App 自身线程'
+        }
+      },
+      {
+        title: '第 4 步 · 写入并执行阶段一 bootstrapper.bin',
+        text: '服务端把无 libc 依赖的 bootstrapper-arm64.bin 写进 allocation_base，在目标栈上布置 FridaBootstrapContext 后发起 RemoteCall。bootstrapper 在目标进程内读 /proc/self/auxv 与 linker 符号表，填满 17 个 libc/linker 函数地址（含 __loader_dlopen），并调 socketpair() 建好 ctrlfds[0..1]。',
+        code: 'write_memory(allocation_base, bootstrapper_code)\nRemoteCall(frida_bootstrap, &bootstrap_ctx)\n  → 填充 FridaLibcApi + socketpair(AF_UNIX, ctrlfds)',
+        refs: [
+          ['frida_bootstrap L152', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/helpers/bootstrapper.c#L152-L191'],
+          ['Android linker 符号 L331', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/helpers/bootstrapper.c#L331-L340']
+        ],
+        live: ['box-regs', 'box-mem'],
+        changed: ['st-reg-pc', 'st-reg-x0', 'st-mem-rwx'],
+        badges: { srv: '收集符号表', regs: '运行 bootstrapper', mem: 'ctrlfds 已建' },
+        state: {
+          srvAction: '读回目标进程的 FridaLibcApi 与 ctrlfds[0..1]',
+          srvChan: '目标内已建 socketpair ctrlfds[0..1]',
+          regState: 'frida_bootstrap 返回 0x320，现场还原',
+          regPc: 'PC = allocation_base (frida_bootstrap) · LR = 0x320',
+          regX0: 'FRIDA_BOOTSTRAP_SUCCESS',
+          memRwx: '存有 bootstrapper + 栈上填好的 FridaLibcApi',
+          memWorker: '尚未拉起 worker'
+        }
+      },
+      {
+        title: '第 5 步 · pidfd_getfd 偷回 ctrlfds[0]，并覆盖写入阶段二 loader.bin',
+        text: '服务端利用 pidfd_open + pidfd_getfd 把目标进程里的 ctrlfds[0] 跨进程复制到自己手里（旧内核则监听 abstract socket /frida-<uuid>）；随后把 loader-arm64.bin、FridaLoaderContext、FridaLibcApi 和 "frida_agent_main" 覆盖写进同一块 allocation_base。',
+        code: 'sockfd = pidfd_getfd(pidfd, ctrlfds[0])\nwrite_memory(allocation_base, loader_code + loader_ctx + libc_api)',
+        refs: [
+          ['写入 loader L908', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L908-L925'],
+          ['pidfd_getfd L1246', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L1246-L1263']
+        ],
+        live: ['box-srv', 'box-mem'],
+        changed: ['st-srv-chan', 'st-mem-rwx'],
+        badges: { srv: '拿到 ctrlfd', regs: '暂停待发', mem: 'loader 就绪' },
+        state: {
+          srvAction: '已将 loader-arm64.bin 与上下文写入 allocation_base',
+          srvChan: 'frida_ctrl 已打通（pidfd_getfd 匿名 socketpair）',
+          regState: '暂停中，准备执行最后一次 RemoteCall',
+          regPc: '待设为 frida_load',
+          regX0: '待设为 &loader_ctx',
+          memRwx: '已覆盖为 loader-arm64.bin + LoaderContext + LibcApi',
+          memWorker: '尚未拉起 worker'
+        }
+      },
+      {
+        title: '第 6 步 · 调用 frida_load() 拉起 worker 线程，主线程立刻 DETACH！',
+        text: '最后一次 RemoteCall 调用 frida_load(ctx)。它只做了一件事：调用 pthread_create(&worker, frida_main) 后立刻返回 0x320。frida-server 立刻恢复原寄存器并 PTRACE_DETACH——App 主线程恢复正常运行，完全不被 dlopen 阻塞！',
+        code: 'frida_load(ctx) { ctx->libc->pthread_create(&ctx->worker, NULL, frida_main, ctx); }\n→ 回到 0x320 → 恢复 saved_registers → ptrace(PTRACE_DETACH)',
+        refs: [
+          ['frida_load L61', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/helpers/loader.c#L61-L64'],
+          ['launch_loader L1021', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L1021-L1025']
+        ],
+        live: ['box-regs', 'box-mem'],
+        changed: ['st-reg-state', 'st-mem-worker'],
+        badges: { srv: '释放主线程', regs: '已 DETACH 恢复', mem: 'worker 启动' },
+        state: {
+          srvAction: '已还原寄存器并 DETACH，等待 worker 握手',
+          srvChan: 'frida_ctrl 监听 HELLO',
+          regState: '已 PTRACE_DETACH（TracerPid 归 0，App 恢复流畅运行）',
+          regPc: '已完全还原为 App 原始 PC / LR',
+          regX0: '已完全还原为 App 原始寄存器',
+          memRwx: 'loader 驻留中，供后台 worker 执行',
+          memWorker: '新线程 frida_main 已启动！'
+        }
+      },
+      {
+        title: '第 7 步 · HELLO 握手，SCM_RIGHTS 跨进程送入 agent.so 的 memfd',
+        text: '后台 worker 线程先通过 ctrlfds[1] 发 HELLO(tid) 报到；与此同时 frida-server 侧的 RemoteAgent.start() 经由 frida_ctrl.send_fd()（Unix Socket SCM_RIGHTS 辅助消息）把 agent.so 的 memfd 跨进程发送过来，worker 用 frida_receive_fd() 拿到本进程可见的 agent_codefd。',
+        code: '[worker → server] FRIDA_MESSAGE_HELLO (tid)\n[server → worker] frida_ctrl.send_fd(memfd)  // SCM_RIGHTS\n[worker] agent_codefd = frida_receive_fd(ctrlfd)',
+        refs: [
+          ['RemoteAgent.start L1539', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/frida-helper-backend.vala#L1539-L1545'],
+          ['frida_receive_fd L110', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/helpers/loader.c#L110-L115']
+        ],
+        live: ['box-srv', 'box-mem'],
+        changed: ['st-srv-action', 'st-mem-worker'],
+        badges: { srv: '发送双 FD', regs: '正常运行', mem: '收到 memfd' },
+        state: {
+          srvAction: '经 SCM_RIGHTS 依次发送 agent_codefd 与 agent_ctrlfd',
+          srvChan: 'frida_ctrl 正在传输控制消息与文件描述符',
+          regState: '正常业务运行中，不受干扰',
+          regPc: 'App 正常执行',
+          regX0: 'App 正常执行',
+          memRwx: 'worker 正在执行 frida_main',
+          memWorker: '已收到 agent_codefd，准备拼 /proc/self/fd/N'
+        }
+      },
+      {
+        title: '第 8 步 · 伪装 libc->close 地址调用 __loader_dlopen 加载 frida-agent.so',
+        text: 'worker 把刚收到的 agent_codefd 拼成 "/proc/self/fd/<N>"，将 caller_addr 伪装成 libc->close 的地址，调用 Android linker 的 __loader_dlopen() 成功绕过 Linker Namespace 限制载入 frida-agent.so，再用 dlsym 找出 frida_agent_main 入口函数。',
+        code: 'sprintf(agent_path, "/proc/self/fd/%d", agent_codefd);\ndlopen(agent_path, RTLD_LAZY, /* caller = */ libc->close);\ndlsym(agent_handle, "frida_agent_main", libc->close);',
+        refs: [
+          ['伪装 caller 加载 L108', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/helpers/loader.c#L108-L129']
+        ],
+        live: ['box-mem'],
+        changed: ['st-mem-worker'],
+        badges: { srv: '等待 READY', regs: '正常运行', mem: 'agent.so 已载入' },
+        state: {
+          srvAction: '等待 worker 完成 dlopen 并回发 READY',
+          srvChan: 'frida_ctrl 监听 READY',
+          regState: '正常业务运行中',
+          regPc: 'App 正常执行',
+          regX0: 'App 正常执行',
+          memRwx: 'loader 等待移交控制权',
+          memWorker: 'frida-agent.so 已映射进 App！已定位 frida_agent_main'
+        }
+      },
+      {
+        title: '第 9 步 · 收第二枚 FD，READY/ACK 同步后进入 frida_agent_main() 建 D-Bus',
+        text: 'worker 再经 SCM_RIGHTS 收到专用于后续通信的 agent_ctrlfd，发送 READY 并收到服务端 ACK 后正式进入 frida_agent_main()。Runner 把 agent_ctrlfd 拼成 "socket:<fd>" 升级为 P2P D-Bus 连接，登记 Gum.Cloak 并启动 GumJS 线程——注入彻底完成！',
+        code: 'agent_ctrlfd = frida_receive_fd(ctrlfd) → READY ↔ ACK\n→ frida_agent_main() → setup_connection("socket:<fd>") → P2P D-Bus 就绪',
+        refs: [
+          ['进入 entrypoint L131', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/helpers/loader.c#L131-L144'],
+          ['agent.vala L148', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/agent.vala#L148-L164'],
+          ['衔接 D-Bus 专题', 'frida-dbus-guide.html']
+        ],
+        live: ['box-srv', 'box-mem'],
+        changed: ['st-srv-chan', 'st-mem-worker'],
+        badges: { srv: 'D-Bus 已连通', regs: '正常运行', mem: 'Agent 就绪' },
+        state: {
+          srvAction: 'perform_attach_to() 返回 agent_ctrl IOStream 给上层会话',
+          srvChan: 'agent_ctrlfd 已升级为 HostSession ↔ AgentSession P2P D-Bus',
+          regState: '正常业务运行中',
+          regPc: 'App 正常执行',
+          regX0: 'App 正常执行',
+          memRwx: 'agent_range 已加入 Gum.Cloak',
+          memWorker: 'frida_agent_main 运行中，gmain / gum-js-loop 就绪待命'
+        }
+      }
+    ];
+
+    const byId = id => document.getElementById(id);
+    const stepList = byId('step-list');
+    const stepButtons = [...stepList.querySelectorAll('.step-btn')];
+    const token = byId('step-token');
+    const btnPlay = byId('btn-play');
+    const btnPrev = byId('btn-prev');
+    const btnNext = byId('btn-next');
+    const btnReset = byId('btn-reset');
+    const phaseBtns = [...document.querySelectorAll('.phase-pills button')];
+
+    let step = 0;
+    let timer = null;
+
+    function positionToken(animate) {
+      const outer = stepList.getBoundingClientRect();
+      const target = stepButtons[step].getBoundingClientRect();
+      token.classList.toggle('moving', animate);
+      token.style.transform = `translateY(${target.top - outer.top + (target.height - 12) / 2}px)`;
+      token.hidden = false;
+    }
+
+    function render(animate = true) {
+      const f = frames[step];
+
+      stepButtons.forEach((btn, i) => {
+        if (i === step) btn.setAttribute('aria-current', 'step');
+        else btn.removeAttribute('aria-current');
+      });
+
+      ['box-srv', 'box-regs', 'box-mem'].forEach(id => {
+        byId(id).classList.toggle('live', f.live.includes(id));
+      });
+
+      byId('srv-badge').textContent = f.badges.srv;
+      byId('regs-badge').textContent = f.badges.regs;
+      byId('mem-badge').textContent = f.badges.mem;
+
+      const map = {
+        'st-srv-action': f.state.srvAction,
+        'st-srv-chan': f.state.srvChan,
+        'st-reg-state': f.state.regState,
+        'st-reg-pc': f.state.regPc,
+        'st-reg-x0': f.state.regX0,
+        'st-mem-rwx': f.state.memRwx,
+        'st-mem-worker': f.state.memWorker
+      };
+      for (const [id, text] of Object.entries(map)) {
+        const row = byId(id);
+        row.querySelector('dd').textContent = text;
+        row.classList.toggle('changed', f.changed.includes(id));
+      }
+
+      byId('ann-title').textContent = f.title;
+      byId('ann-text').textContent = f.text;
+      byId('ann-code').textContent = f.code;
+
+      const refsEl = byId('ann-refs');
+      refsEl.innerHTML = '';
+      f.refs.forEach(([label, href]) => {
+        const a = document.createElement('a');
+        a.href = href;
+        const isExternal = /^https?:\/\//.test(href);
+        a.textContent = isExternal ? `查看源码：${label}` : `${label} ↗`;
+        if (isExternal) {
+          a.target = '_blank';
+          a.rel = 'noopener';
+        }
+        refsEl.appendChild(a);
+      });
+
+      byId('step-progress').textContent = `第 ${step + 1} / ${frames.length} 步`;
+      btnPrev.disabled = step === 0;
+      btnNext.disabled = step === frames.length - 1;
+      btnPlay.textContent = timer !== null ? '暂停' : step === frames.length - 1 ? '重播' : '播放';
+
+      phaseBtns[0].classList.toggle('is-phase', step < 3);
+      phaseBtns[1].classList.toggle('is-phase', step >= 3 && step < 6);
+      phaseBtns[2].classList.toggle('is-phase', step >= 6);
+
+      positionToken(animate);
+    }
+
+    function stop() {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    }
+
+    function seek(next) {
+      stop();
+      step = Math.max(0, Math.min(frames.length - 1, next));
+      render(true);
+    }
+
+    btnPlay.addEventListener('click', () => {
+      if (timer !== null) { stop(); render(false); return; }
+      if (step === frames.length - 1) step = 0;
+      timer = setInterval(() => {
+        step++;
+        if (step === frames.length - 1) stop();
+        render(true);
+      }, 2800);
+      render(true);
+    });
+    btnPrev.addEventListener('click', () => seek(step - 1));
+    btnNext.addEventListener('click', () => seek(step + 1));
+    btnReset.addEventListener('click', () => seek(0));
+    stepButtons.forEach((btn, i) => btn.addEventListener('click', () => seek(i)));
+    phaseBtns.forEach(btn => btn.addEventListener('click', () => seek(Number(btn.dataset.jump))));
+
+    if ('ResizeObserver' in window) {
+      new ResizeObserver(() => positionToken(false)).observe(stepList);
+    } else {
+      window.addEventListener('resize', () => positionToken(false));
+    }
+
+    render(false);
+  </script>
+</body>
+</html>
