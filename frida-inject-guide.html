@@ -907,6 +907,120 @@
       .se-arr { transform: rotate(90deg); padding: 2px 0; }
       .se-gate-grid { grid-template-columns: 1fr; }
     }
+
+    /* 3.1 Mini 3-step strip & 3.2 RemoteCall ARM64 Register Viz */
+    .mini-pipe-3 {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 22px minmax(0, 1fr) 22px minmax(0, 1fr);
+      gap: 6px;
+      align-items: stretch;
+    }
+    .rc-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .rc-tabs button {
+      cursor: pointer;
+      padding: 5px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--sub);
+      font: 600 12.5px var(--sans);
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .rc-tabs button:hover { background: #edf3fb; color: var(--ink); }
+    .rc-tabs button.is-active {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
+    .rc-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+    .rc-story {
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f9fbff;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .rc-story-badge {
+      display: inline-block;
+      align-self: flex-start;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font: 700 11.5px var(--mono);
+      background: var(--blue-soft);
+      color: var(--blue-strong);
+    }
+    .rc-story-badge.is-trap { background: var(--amber-soft); color: var(--amber); }
+    .rc-story-badge.is-ok { background: var(--teal-soft); color: var(--teal); }
+    .rc-story h4 { margin: 0; font-size: 15.5px; color: var(--ink); }
+    .rc-story p { margin: 0; font-size: 13.8px; color: var(--sub); line-height: 1.65; }
+    .rc-flow-mini {
+      margin-top: auto;
+      padding: 9px 11px;
+      border-radius: 7px;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      font: 12.5px/1.6 var(--mono);
+      white-space: pre-wrap;
+    }
+    .rc-regs {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .rc-regs-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 13px;
+      background: #eef3fa;
+      border-bottom: 1px solid var(--line);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .rc-reg-list {
+      margin: 0;
+      padding: 10px 13px;
+      display: grid;
+      gap: 6px;
+      font-size: 13px;
+    }
+    .rc-reg-row {
+      display: grid;
+      grid-template-columns: 112px minmax(0, 1fr);
+      gap: 8px;
+      align-items: baseline;
+      padding: 5px 8px;
+      border-left: 3px solid transparent;
+      border-radius: 0 5px 5px 0;
+      background: #fafcfe;
+    }
+    .rc-reg-row.hl {
+      background: var(--amber-soft);
+      border-left-color: var(--amber);
+    }
+    .rc-reg-row.hl-ok {
+      background: var(--teal-soft);
+      border-left-color: var(--teal);
+    }
+    .rc-reg-row dt { font: 700 12.5px var(--mono); color: var(--ink); }
+    .rc-reg-row dd { margin: 0; font: 12.5px/1.45 var(--mono); color: var(--sub); overflow-wrap: anywhere; }
+    .rc-reg-row.hl dd { color: var(--amber); font-weight: 700; }
+    .rc-reg-row.hl-ok dd { color: var(--teal); font-weight: 700; }
+    @media (max-width: 900px) {
+      .mini-pipe-3, .rc-grid { grid-template-columns: 1fr; }
+    }
     .trace-card {
       padding: 16px 18px;
       border: 1px solid var(--line);
@@ -1341,7 +1455,35 @@
 
           <!-- 3.1 -->
           <h3 id="s-entry">3.1 入口接缝：<code>perform_attach_to()</code> 与 <code>memfd</code> 备弹</h3>
-          <p>电脑端发来 <code>attach(pid)</code> 后，手机上的 <code>frida-server</code> 进入 <code>linux-host-session.vala</code> 的 <code>perform_attach_to()</code>：指定入口符号 <code>"frida_agent_main"</code> 并设置 <code>AgentFeatures.CONTROL_CHANNEL</code>，把内嵌的 <code>agent</code> 资源交给 <code>Linjector</code>，随后立刻取回与 <code>agent</code> 直连的 <code>IOStream</code> 交给上层建立 P2P D-Bus 会话。</p>
+          <p>电脑端发来 <code>attach(pid)</code> 后，手机上的 <code>frida-server</code> 进入 <code>linux-host-session.vala</code> 的 <code>perform_attach_to()</code>。它相当于<strong>总指挥</strong>，不亲自做 <code>ptrace</code> 脏活，只负责清晰地下达 3 件事：<strong>定入口 → 备弹拿 <code>fd</code> → 要回 D-Bus 管道</strong>：</p>
+
+          <figure class="selinux-viz" aria-label="3.1 perform_attach_to 三步总指挥流程图">
+            <div class="selinux-viz-head">
+              <strong>图 3 · <code>perform_attach_to(pid)</code> 干的三件朴素的事</strong>
+              <span class="muted">入口接缝 · 总指挥视角</span>
+            </div>
+            <div class="selinux-viz-body">
+              <div class="mini-pipe-3">
+                <div class="se-step">
+                  <span class="se-num">STEP 1 · 定入口</span>
+                  <b>指定 <code>frida_agent_main</code></b>
+                  <span>告诉注入器：把 <code>agent.so</code> 塞进目标 App 后，请帮我调用里面的 <code>frida_agent_main()</code> 启动它。</span>
+                </div>
+                <div class="se-arr" aria-hidden="true">→</div>
+                <div class="se-step is-kernel">
+                  <span class="se-num">STEP 2 · 备弹拿 FD</span>
+                  <b>按目标架构写进 <code>memfd</code></b>
+                  <span>按目标 <code>pid</code> 判断 64/32 位，从内嵌数据区挑出 <code>frida-agent-64.so</code> 写入纯内存 <code>memfd</code>，拿到 <strong><code>fd</code></strong> 交给 <code>LinuxHelperBackend</code>。</span>
+                </div>
+                <div class="se-arr" aria-hidden="true">→</div>
+                <div class="se-step is-tag">
+                  <span class="se-num">STEP 3 · 要通道</span>
+                  <b>取回 <code>IOStream</code> 跑 D-Bus</b>
+                  <span>调用 <code>request_control_channel(id)</code>，拿到连向目标 App 内 <code>agent</code> 的双向流 <code>IOStream</code>，交给上层建第二段 P2P D-Bus。</span>
+                </div>
+              </div>
+            </div>
+          </figure>
 
           <figure class="source-excerpt">
             <div class="source-filebar">
@@ -1378,11 +1520,44 @@
 
           <!-- 3.2 -->
           <h3 id="s-remotecall">3.2 <code>ptrace</code> 劫持与 <code>RemoteCall</code>：假返回地址 <code>0x320</code></h3>
-          <p><code>LinuxHelperBackend</code> 打开 <code>InjectSession</code>（继承 <code>SeizeSession</code>）：Linux 3.4+ 优先用 <strong><code>PTRACE_SEIZE</code> + <code>PTRACE_INTERRUPT</code></strong> 静默接管并暂停目标线程，通过 <code>PTRACE_GETREGSET</code> 备份完整寄存器 <code>saved_registers</code>。之后每一次在目标进程里远程调函数，都由 <code>RemoteCall.execute()</code> 完成：</p>
-          <ul>
-            <li>按 ARM64 调用约定将参数写入 <code>x0..x5</code>，把 <code>PC</code> 改成目标函数地址，把返回地址 <strong><code>LR (x30)</code> 设为故意触发 <code>SIGSEGV</code> 的 <code>DUMMY_RETURN_ADDRESS = 0x320</code></strong>；</li>
-            <li>放行目标线程执行，等函数 <code>RET</code> 跳去 <code>0x320</code> 触发 <code>SIGSEGV</code> 时被 <code>ptrace</code> 精准拦回，核对 <code>PC == 0x320</code> 后从 <code>x0</code> 读出返回值，并立即写回 <code>saved_registers</code> 还原现场。</li>
-          </ul>
+          <p>跨进程无法直接调用别人进程里的函数（比如调目标 App 里的 <code>mmap()</code> 申请内存）。Frida 的解法叫 <strong><code>RemoteCall</code>（“时间暂停 + 借壳执行”）</strong>：先用 <code>PTRACE_SEIZE</code> + <code>PTRACE_INTERRUPT</code> 静默冻住目标线程、拍照存好全部寄存器，再手动改写 ARM64 寄存器伪造一次函数调用——最巧的是<strong>故意把返回地址 <code>LR</code> 设成非法地址 <code>0x320</code></strong>，等函数跑完执行 <code>RET</code> 时必然撞墙触发可控 <code>SIGSEGV</code>，被 <code>ptrace</code> 精准拦回、读走 <code>x0</code> 返回值并瞬间还原现场，目标 App 完全察觉不到！</p>
+
+          <!-- 图 4：ARM64 RemoteCall 4 步交互寄存器图解 -->
+          <figure class="selinux-viz" aria-label="ARM64 RemoteCall 借壳执行四步寄存器变化图">
+            <div class="selinux-viz-head">
+              <strong>图 4 · <code>RemoteCall</code> 寄存器傀儡术（点击 4 步观察 ARM64 寄存器如何变化）</strong>
+              <div class="rc-tabs" role="tablist" aria-label="RemoteCall 四步切换">
+                <button type="button" class="is-active" data-rc="0">① 暂停存档</button>
+                <button type="button" data-rc="1">② 篡改寄存器</button>
+                <button type="button" data-rc="2">③ 撞墙 0x320</button>
+                <button type="button" data-rc="3">④ 取值还原</button>
+              </div>
+            </div>
+            <div class="selinux-viz-body">
+              <div class="rc-grid">
+                <div class="rc-story">
+                  <span class="rc-story-badge" id="rc-badge">STEP 1 / 4 · 冻结现场</span>
+                  <h4 id="rc-title"></h4>
+                  <p id="rc-desc"></p>
+                  <div class="rc-flow-mini" id="rc-flow"></div>
+                </div>
+                <div class="rc-regs">
+                  <div class="rc-regs-head">
+                    <span>目标 App 线程 · ARM64 CPU 寄存器</span>
+                    <span id="rc-thread-state" class="muted">已暂停</span>
+                  </div>
+                  <dl class="rc-reg-list">
+                    <div class="rc-reg-row" id="reg-pc"><dt>PC (指令指针)</dt><dd></dd></div>
+                    <div class="rc-reg-row" id="reg-lr"><dt>LR / x30 (返回)</dt><dd></dd></div>
+                    <div class="rc-reg-row" id="reg-x0"><dt>x0 (参0 / 返回值)</dt><dd></dd></div>
+                    <div class="rc-reg-row" id="reg-args"><dt>x1..x5 (其余参数)</dt><dd></dd></div>
+                    <div class="rc-reg-row" id="reg-saved"><dt>saved_registers</dt><dd></dd></div>
+                  </dl>
+                </div>
+              </div>
+            </div>
+            <figcaption class="selinux-viz-foot">核心秘诀：因为 <code>frida-server</code> 正在用 <code>ptrace</code> 盯着目标线程，跳到 <code>0x320</code> 产生的 <code>SIGSEGV</code> <strong>不会导致 App 崩溃</strong>，而是充当“函数已跑完、快来收结果”的精准闹钟。</figcaption>
+          </figure>
 
           <figure class="source-excerpt">
             <div class="source-filebar">
@@ -2165,6 +2340,109 @@
       seBtnBefore.addEventListener('click', () => setSeMode(false));
       seBtnAfter.addEventListener('click', () => setSeMode(true));
       setSeMode(true);
+    }
+
+    // 5. ARM64 RemoteCall 4-Step Register Visualizer
+    const rcTabs = [...document.querySelectorAll('.rc-tabs button')];
+    if (rcTabs.length) {
+      const rcSteps = [
+        {
+          badge: 'STEP 1 / 4 · 时间暂停与拍照存档',
+          badgeClass: '',
+          thread: 'PTRACE 已冻结',
+          title: '静默冻住目标线程，备份全部原始寄存器',
+          desc: 'frida-server 用 PTRACE_SEIZE + PTRACE_INTERRUPT 把目标 App 线程原地冻住（不发 SIGSTOP 干扰信号），然后调用 PTRACE_GETREGSET 把它原本的寄存器原封不动备份到 saved_registers。',
+          flow: 'PTRACE_SEIZE(tid) → PTRACE_INTERRUPT(tid)\nPTRACE_GETREGSET → saved_registers = {原 PC, 原 LR, 原 x0..x30}',
+          regs: {
+            pc: '0x7a10_4420  (App 原业务指令)',
+            lr: '0x7a10_4108  (App 原返回地址)',
+            x0: '0x0000_0001  (App 原数据)',
+            args: 'x1..x5 = App 原业务寄存器',
+            saved: '✅ 已完整拍照存档'
+          },
+          hl: [],
+          hlOk: ['reg-saved']
+        },
+        {
+          badge: 'STEP 2 / 4 · 伪造一次函数调用',
+          badgeClass: '',
+          thread: '准备放行执行',
+          title: '填入参数、把 PC 指向 mmap、把 LR 设成陷阱 0x320',
+          desc: '按 ARM64 调用约定，把 mmap() 的 6 个参数填进 x0..x5，把 PC 改成目标进程里 mmap 的地址，并故意把返回地址 LR 设为永远未映射的非法地址 0x320，然后 PTRACE_SETREGSET 写回 CPU 并放行！',
+          flow: 'x0..x5 = mmap(NULL, size, RWX, MAP_PRIVATE|ANON, -1, 0)\nPC = remote_mmap   |   LR = 0x320 (陷阱返回地址)\nPTRACE_CONT → 放行目标线程执行 mmap()',
+          regs: {
+            pc: '0x7b88_1200  (目标进程 libc::mmap)',
+            lr: '0x0000_0320  (⚠ 故意设为非法地址)',
+            x0: '0x0000_0000  (arg0: addr = NULL)',
+            args: 'x1=size, x2=RWX, x3=flags, x4=-1, x5=0',
+            saved: '保持备份不动'
+          },
+          hl: ['reg-pc', 'reg-lr', 'reg-x0', 'reg-args'],
+          hlOk: []
+        },
+        {
+          badge: 'STEP 3 / 4 · RET 撞墙触发可控闹钟',
+          badgeClass: 'is-trap',
+          thread: 'SIGSEGV 被 ptrace 截获',
+          title: 'mmap 跑完把结果放进 x0，RET 跳 0x320 精准停下',
+          desc: '目标线程老老实实执行完 mmap()，把新开辟的 RWX 内存地址写进 x0；随后 RET 跳往 LR (0x320)，访问非法地址触发 SIGSEGV。因为 ptrace 正在监听，内核不会让 App 崩溃，而是立刻暂停线程并通知 frida-server！',
+          flow: 'mmap() 完成 → x0 = 0x7c90_0000 (新 RWX 内存)\nRET → 跳到 PC = 0x320 → 触发 SIGSEGV\n内核截住信号并暂停线程 → 唤醒 frida-server',
+          regs: {
+            pc: '0x0000_0320  (🎯 精准停在暗号地址)',
+            lr: '0x0000_0320',
+            x0: '0x7c90_0000  (🎉 返回值：新 RWX 基址)',
+            args: '已被 mmap 内部使用',
+            saved: '保持备份不动'
+          },
+          hl: ['reg-pc'],
+          hlOk: ['reg-x0']
+        },
+        {
+          badge: 'STEP 4 / 4 · 核对暗号、拿走结果、瞬间还原',
+          badgeClass: 'is-ok',
+          thread: '现场已原样恢复',
+          title: '确认 PC == 0x320，抄走 x0 并写回 saved_registers',
+          desc: 'frida-server 核对 PC 确实等于 0x320（确认函数正常跑完），从 x0 抄走新内存地址 allocation_base，再把第 ① 步备份的 saved_registers 原样写回 CPU 寄存器——App 恢复运行后完全不知道刚刚被“借壳”过。',
+          flow: 'assert(PC == 0x320) → return_value = x0 (0x7c90_0000)\nPTRACE_SETREGSET(saved_registers) → 完美还原现场',
+          regs: {
+            pc: '0x7a10_4420  (已恢复原业务指令)',
+            lr: '0x7a10_4108  (已恢复原返回地址)',
+            x0: '0x0000_0001  (已恢复 App 原数据)',
+            args: 'x1..x5 = 已恢复 App 原寄存器',
+            saved: '✅ 已写回 CPU（拿到新内存 0x7c90_0000）'
+          },
+          hl: [],
+          hlOk: ['reg-pc', 'reg-lr', 'reg-x0', 'reg-saved']
+        }
+      ];
+
+      function setRcStep(idx) {
+        const s = rcSteps[idx];
+        rcTabs.forEach((b, i) => b.classList.toggle('is-active', i === idx));
+        const badge = byId('rc-badge');
+        badge.textContent = s.badge;
+        badge.className = 'rc-story-badge' + (s.badgeClass ? ' ' + s.badgeClass : '');
+        byId('rc-thread-state').textContent = s.thread;
+        byId('rc-title').textContent = s.title;
+        byId('rc-desc').textContent = s.desc;
+        byId('rc-flow').textContent = s.flow;
+
+        const map = {
+          'reg-pc': s.regs.pc,
+          'reg-lr': s.regs.lr,
+          'reg-x0': s.regs.x0,
+          'reg-args': s.regs.args,
+          'reg-saved': s.regs.saved
+        };
+        for (const [id, val] of Object.entries(map)) {
+          const row = byId(id);
+          row.querySelector('dd').textContent = val;
+          row.classList.toggle('hl', s.hl.includes(id));
+          row.classList.toggle('hl-ok', s.hlOk.includes(id));
+        }
+      }
+      rcTabs.forEach((b, i) => b.addEventListener('click', () => setRcStep(i)));
+      setRcStep(0);
     }
   </script>
 </body>
