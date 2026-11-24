@@ -80,8 +80,24 @@
       font: 700 11.5px/1.4 var(--mono);
       letter-spacing: 0.1em;
       color: var(--blue);
-      margin: 0 0 22px;
+      margin: 0 0 12px;
     }
+    .back-home {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0 0 20px;
+      padding: 5px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--sub);
+      font-size: 12.5px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .back-home:hover { border-color: var(--blue); color: var(--blue-strong); }
     .side-title {
       font-size: 12px;
       font-weight: 700;
@@ -970,6 +986,7 @@
     <aside class="sidebar" aria-label="文章目录">
       <div class="side-inner">
         <div class="brand">ANDROID SECURITY / NOTES</div>
+        <a class="back-home" href="index.html">← 返回文档索引</a>
         <div class="side-title">阅读路线</div>
         <nav class="toc" id="toc">
           <a href="#basic-use" class="active"><span class="num">01</span>Frida 基本使用</a>
@@ -1044,7 +1061,7 @@
               <h4>手机端（Android，root）：启动 <code>frida-server</code></h4>
               <p>从发布页下载与手机 CPU 架构（如 <code>arm64</code>）和电脑端版本一致的 <code>frida-server</code>，推到手机里以后台高权限运行。</p>
               <pre class="mini-cmd">adb push frida-server /data/local/tmp/
-adb shell "su -c 'chmod +x /data/local/tmp/frida-server && /data/local/tmp/frida-server &amp;'"</pre>
+adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/tmp/frida-server &gt;/dev/null 2&gt;&amp;1 &amp;'"</pre>
             </article>
           </div>
 
@@ -1692,9 +1709,11 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server && /data/local/tmp/frida
   </div>
 
   <script>
-    // 1. Sidebar Scroll-Spy
+    // 1. Sidebar Scroll-Spy (tracks both top-level chapters and subproject sections)
     const tocLinks = [...document.querySelectorAll('#toc a')];
-    const trackedIds = ['basic-use', 'git-repo', 'subprojects', 'put-together', 'sources'];
+    const trackedIds = tocLinks
+      .map(link => link.getAttribute('href').replace(/^#/, ''))
+      .filter(Boolean);
     const sections = trackedIds.map(id => document.getElementById(id)).filter(Boolean);
 
     function setActiveToc(id) {
@@ -1706,25 +1725,31 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server && /data/local/tmp/frida
       });
     }
 
-    if ('IntersectionObserver' in window && sections.length) {
-      const visibleMap = new Map();
-      const observer = new IntersectionObserver(entries => {
-        for (const entry of entries) {
-          visibleMap.set(entry.target.id, entry.isIntersecting ? entry.boundingClientRect.top : null);
+    function updateTocFromScroll() {
+      const offset = 120;
+      let current = sections[0];
+      for (const sec of sections) {
+        if (sec.getBoundingClientRect().top <= offset) {
+          current = sec;
         }
-        let bestId = null;
-        let bestTop = Infinity;
-        for (const sec of sections) {
-          const top = visibleMap.get(sec.id);
-          if (top !== null && top !== undefined && Math.abs(top) < bestTop) {
-            bestTop = Math.abs(top);
-            bestId = sec.id;
-          }
-        }
-        if (bestId) setActiveToc(bestId);
-      }, { rootMargin: '-12% 0px -65% 0px', threshold: [0, 0.25] });
-      sections.forEach(sec => observer.observe(sec));
+      }
+      if (current) setActiveToc(current.id);
     }
+
+    let scrollTicking = false;
+    window.addEventListener('scroll', () => {
+      if (scrollTicking) return;
+      scrollTicking = true;
+      requestAnimationFrame(() => {
+        updateTocFromScroll();
+        scrollTicking = false;
+      });
+    }, { passive: true });
+    window.addEventListener('hashchange', () => {
+      const id = location.hash.replace(/^#/, '');
+      if (id && trackedIds.includes(id)) setActiveToc(id);
+    });
+    updateTocFromScroll();
 
     // 2. Copy Buttons
     document.querySelectorAll('.copy-btn').forEach(btn => {
