@@ -1002,9 +1002,9 @@
           <a href="#sources"><span class="num">05</span>源码索引</a>
         </nav>
         <div class="side-foot">
-          主仓库结构：<code>frida/frida @ a93582c</code><br>
-          调用链锚点：<code>Frida 16.4.7</code> · <code>frida-tools 12.5.0</code><br>
-          已注明 <code>Frida 17+</code> Java Bridge 拆包差异。
+          统一基准：<code>Frida 17.27.5</code>（<code>bbb7e229</code>）<br>
+          Core / Gum：<code>075600d9</code> · <code>dd74ec09</code><br>
+          Java Bridge：<code>v7.1.0</code>（<code>f9d16209</code>）
         </div>
       </div>
     </aside>
@@ -1015,7 +1015,7 @@
           <div class="scope-row">
             <span class="badge">Frida Android 系列 · 第一篇</span>
             <span class="badge teal">先跑 Demo → 再拆仓库 → 落位到进程</span>
-            <span class="badge amber">源码基准：Frida 16.4.7（附 17+ 说明）</span>
+            <span class="badge amber">源码基准：Frida 17.27.5 + frida-java-bridge v7.1.0</span>
           </div>
           <h1>Frida Android 入门与源码仓库拆解</h1>
           <p class="hero-lead">研究 Frida 在 Android 上的工作原理，最稳妥的第一步不是直接啃底层注入和 ART 内存布局，而是先亲手跑通一个<strong>最简单的 Java 方法 Hook</strong>，再带着疑问打开 Frida 的 Git 仓库：把里面拆出来的几个子项目——<strong>用什么语言写、编译产出是什么、原本干什么用、最终怎么被加载在哪里运行</strong>——彻底盘清楚。</p>
@@ -1054,8 +1054,8 @@
           <div class="prep-grid">
             <article class="info-card">
               <h4>电脑端（Windows）：安装命令行工具</h4>
-              <p>安装 <code>frida-tools</code>（会自动连带安装 Python 绑定包 <code>frida</code>），装完后终端就有 <code>frida</code>、<code>frida-ps</code> 等命令了。</p>
-              <pre class="mini-cmd">pip install frida-tools==12.5.0 frida==16.4.7</pre>
+              <p>安装 <code>frida-tools</code> 与 <code>frida</code>（以最新版 <code>17.27.5</code> 为例），装完后终端就有 <code>frida</code>、<code>frida-ps</code> 等命令了。</p>
+              <pre class="mini-cmd">pip install frida==17.27.5 frida-tools</pre>
             </article>
             <article class="info-card">
               <h4>手机端（Android，root）：启动 <code>frida-server</code></h4>
@@ -1116,12 +1116,12 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
         <section id="git-repo" class="chapter">
           <p class="chapter-kicker">02 / Exploring the Git Repository</p>
           <h2>查看 Frida 的 Git 项目：原来是由多个子项目拼出来的</h2>
-          <p class="lead">直接打开 GitHub 上的主仓库 <a href="https://github.com/frida/frida/tree/a93582c832d74de1eaa0ec59994365f6981368db"><code>frida/frida</code></a>，第一眼很容易愣住：根目录几乎没有业务代码，全都是构建脚本和子模块配置文件。</p>
+          <p class="lead">直接打开 GitHub 上的主仓库 <a href="https://github.com/frida/frida/tree/17.27.5"><code>frida/frida</code>（<code>17.27.5</code>）</a>，第一眼很容易愣住：根目录几乎没有业务代码，全都是构建脚本和子模块配置文件。</p>
 
           <div class="repo-layout">
             <div class="tree-box">
               <div class="code-head">
-                <span>frida/frida @ a93582c 根目录结构</span>
+                <span>frida/frida @ 17.27.5 (bbb7e229) 根目录结构</span>
               </div>
               <pre><span class="t-dir">frida/</span>
 ├── .gitmodules          <span class="t-dim"># 锁定每个子项目的仓库地址与提交</span>
@@ -1151,18 +1151,18 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
               </div>
               <div class="repo-note-item">
                 <strong>先把一个常见困惑提前拆掉：为什么文件数量比项目少？</strong>
-                <p>在 <code>Frida 16.4.7</code> 默认构建里，大量底层库在<strong>编译期就被静态链接合并</strong>了——比如电脑上看不到单独的 <code>frida-core.dll</code>，手机 App 里也看不到单独的 <code>libfrida-gum.so</code>。下一节拆解每个子项目时，我们会专门标清楚“谁合并进了谁”。</p>
+                <p>在 <code>Frida 17.27.5</code> 默认构建里，大量底层库在<strong>编译期就被静态链接合并</strong>了——比如电脑上看不到单独的 <code>frida-core.dll</code>，手机 App 里也看不到单独的 <code>libfrida-gum.so</code>。下一节拆解每个子项目时，我们会专门标清楚“谁合并进了谁”。</p>
               </div>
             </div>
           </div>
 
           <p class="muted">
-            主仓库锚点：
-            <a href="https://github.com/frida/frida/tree/a93582c832d74de1eaa0ec59994365f6981368db">frida/frida</a> ·
-            <a href="https://github.com/frida/frida/blob/a93582c832d74de1eaa0ec59994365f6981368db/.gitmodules">.gitmodules</a> ·
-            <a href="https://github.com/frida/frida/tree/a93582c832d74de1eaa0ec59994365f6981368db/subprojects">subprojects/</a> ·
-            <a href="https://github.com/frida/frida/blob/a93582c832d74de1eaa0ec59994365f6981368db/meson.build">meson.build</a> ·
-            <a href="https://github.com/frida/releng/tree/a5250c7ee39ee20a0169c256f4a33e5a8d027d5c">releng</a>
+            主仓库锚点（<code>17.27.5</code>）：
+            <a href="https://github.com/frida/frida/tree/17.27.5">frida/frida @ 17.27.5</a> ·
+            <a href="https://github.com/frida/frida/blob/17.27.5/.gitmodules">.gitmodules</a> ·
+            <a href="https://github.com/frida/frida/tree/17.27.5/subprojects">subprojects/</a> ·
+            <a href="https://github.com/frida/frida/blob/17.27.5/meson.build">meson.build</a> ·
+            <a href="https://github.com/frida/releng/tree/f66bd2f4a5159f93771587de221df88e2f99be60">releng</a>
           </p>
         </section>
 
@@ -1208,20 +1208,20 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
                       </li>
                       <li class="artifact-item">
                         <div class="artifact-item-top">
-                          <strong>内置辅助 JS 脚本</strong>
-                          <span class="tag-muted">如 REPL / trace 模板</span>
+                          <strong>内置辅助 JS 与 Frida 17 预装 Bridge</strong>
+                          <span class="tag-muted">REPL / bridges/java.js 等</span>
                         </div>
-                        当你使用交互式命令行补全或 <code>frida-trace</code> 时，CLI 会把这些辅助脚本发往目标 App 内的 JS 引擎执行。
+                        Frida 17 起 <code>Java</code> / <code>ObjC</code> 等 Bridge 从运行时拆出，<code>frida-tools</code> 在 <code>frida_tools/bridges/</code> 下预装了它们：当脚本需要 <code>Java</code> 时，<code>application.py</code> 响应 <code>frida:load-bridge</code> 消息把对应 Bridge JS 按需发往 App 内的 GumJS。
                       </li>
                     </ul>
                   </div>
                 </div>
                 <div class="sp-foot">
-                  <span>它在第 1 节 Demo 里的角色：就是你敲下的 <code>frida ...</code> 命令本身。</span>
+                  <span>它在第 1 节 Demo 里的角色：就是你敲下的 <code>frida ...</code> 命令本身（并顺手为脚本预供 Java Bridge）。</span>
                   <div class="sp-foot-links">
-                    <a href="https://github.com/frida/frida-tools/blob/8c0338e8e16205f53e89ecc64e5c36211e1b3f08/pyproject.toml">pyproject.toml</a>
-                    <a href="https://github.com/frida/frida-tools/blob/c1002d27b2c6b7aab39e2c74fbb20a255037f407/setup.py#L61">命令入口 L61</a>
-                    <a href="https://github.com/frida/frida-tools/blob/c1002d27b2c6b7aab39e2c74fbb20a255037f407/frida_tools/application.py#L613">application.py L613</a>
+                    <a href="https://github.com/frida/frida-tools/blob/47723728bda875d40ca5adb26a1596ac01e4f855/pyproject.toml#L59">pyproject.toml L59</a>
+                    <a href="https://github.com/frida/frida-tools/blob/47723728bda875d40ca5adb26a1596ac01e4f855/frida_tools/application.py#L750">attach L750</a>
+                    <a href="https://github.com/frida/frida-tools/blob/47723728bda875d40ca5adb26a1596ac01e4f855/frida_tools/application.py#L989-L1007">加载 Bridge L989</a>
                   </div>
                 </div>
               </div>
@@ -1236,7 +1236,7 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
                   <span class="sp-role">Python 绑定与 C 扩展桥</span>
                 </div>
                 <div class="sp-pills">
-                  <span class="pill">Python + C</span>
+                  <span class="pill">Python + C（frida-bindgen 自动生成）</span>
                   <span class="pill host">运行于：电脑 CLI 进程</span>
                 </div>
               </header>
@@ -1244,7 +1244,7 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
                 <div class="dim-grid">
                   <div class="dim-box">
                     <span class="dim-label">① 使用语言</span>
-                    <p>上层是 <strong>Python</strong> 面向对象包装，下层是 <strong>C</strong> 语言编写的 CPython 原生扩展（<code>extension.c</code>）。</p>
+                    <p>在 <strong>Frida 17</strong> 中，<code>frida-python</code> 通过内置的 <strong><code>frida-bindgen</code></strong>（读取 <code>frida-core</code> 的 GIR 接口元数据）自动生成上层 <strong>Python</strong> 包装与下层 <strong>C</strong> 语言 CPython 原生扩展。</p>
                   </div>
                   <div class="dim-box">
                     <span class="dim-label">④ 怎么被加载、运行在哪里</span>
@@ -1255,7 +1255,7 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
                     <ul class="artifact-list">
                       <li class="artifact-item">
                         <div class="artifact-item-top">
-                          <strong><code>frida</code> Python 包（如 <code>frida/core.py</code>）</strong>
+                          <strong><code>frida</code> Python 包</strong>
                         </div>
                         向 Python 世界暴露 <code>Device</code>、<code>Session</code>、<code>Script</code> 等易用对象；无论命令行还是自己写自动化脚本，都通过这层调底层。
                       </li>
@@ -1264,7 +1264,7 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
                           <strong><code>_frida.pyd</code>（Windows，Linux/macOS 为 <code>_frida*.so</code>）</strong>
                           <span class="tag-static">内含静态链接的电脑端 frida-core</span>
                         </div>
-                        本质是 CPython 可直接 <code>import</code> 的 DLL。它把 <code>device.attach(pid)</code> 等 Python 方法转调到静态链接在自己体内的 <code>frida-core</code> C 函数（如 <code>frida_device_attach_sync()</code>），并把底层异步收到的日志回调抛回 Python。
+                        本质是 CPython 可直接 <code>import</code> 的 DLL。它把 <code>device.attach(pid)</code> 等 Python 方法转调到静态链接在自己体内的 <code>frida-core</code> C 函数，并把底层异步收到的日志回调抛回 Python。
                       </li>
                     </ul>
                   </div>
@@ -1272,9 +1272,8 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
                 <div class="sp-foot">
                   <span>它在第 1 节 Demo 里的角色：连接 Python CLI 与底层 C/Vala 核心的“跨语言桥梁”。</span>
                   <div class="sp-foot-links">
-                    <a href="https://github.com/frida/frida-python/blob/7b56f289054bd0aea0d9fbe32cd7a04a2fb43617/frida/meson.build">frida/meson.build</a>
-                    <a href="https://github.com/frida/frida-python/blob/148ca1461d9b01a9643999540fb1fb64a984d355/frida/core.py#L1058">core.py L1058</a>
-                    <a href="https://github.com/frida/frida-python/blob/148ca1461d9b01a9643999540fb1fb64a984d355/frida/_frida/extension.c#L2854">extension.c L2854</a>
+                    <a href="https://github.com/frida/frida-python/blob/51c790e6197622b21ccff628bf8120b38084f8d5/frida/meson.build">frida/meson.build</a>
+                    <a href="https://github.com/frida/frida-python/tree/51c790e6197622b21ccff628bf8120b38084f8d5/frida/frida_bindgen">frida_bindgen/</a>
                   </div>
                 </div>
               </div>
@@ -1341,12 +1340,12 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
                   </div>
                 </div>
                 <div class="sp-foot">
-                  <span>它在第 1 节 Demo 里的角色：同时包办了“电脑发请求”、“手机当服务端注入”、“App 内收脚本”三段脏活累活。</span>
+                  <span>它在第 1 节 Demo 里的角色：同时包办了“电脑发请求”、“手机当服务端注入（Frida 17 默认自映射 + Zymbiote）”、“App 内收脚本”三段脏活累活。</span>
                   <div class="sp-foot-links">
-                    <a href="https://github.com/frida/frida-core/blob/1c41f2396787436d207e8b2f21569316f7a06f38/meson.build">meson.build</a>
-                    <a href="https://github.com/frida/frida-core/blob/1c41f2396787436d207e8b2f21569316f7a06f38/server/meson.build#L38">server 构建</a>
-                    <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/meson.build#L41">agent 构建</a>
-                    <a href="https://github.com/frida/frida-core/blob/1c41f2396787436d207e8b2f21569316f7a06f38/lib/gadget/meson.build#L66">gadget 构建</a>
+                    <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/meson.build">meson.build</a>
+                    <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/server/meson.build#L38">server 构建</a>
+                    <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/lib/agent/meson.build#L64">agent 构建</a>
+                    <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/lib/gadget/meson.build#L66">gadget 构建</a>
                   </div>
                 </div>
               </div>
@@ -1373,7 +1372,7 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
                   </div>
                   <div class="dim-box">
                     <span class="dim-label">④ 怎么被加载、运行在哪里</span>
-                    <p>在 <code>Frida 16.4.7</code> 默认构建中，它<strong>不会</strong>以独立的 <code>libfrida-gum.so</code> 出现在手机里，而是直接<strong>静态链接进 <code>frida-agent.so</code></strong>。因此只要 <code>agent.so</code> 被注入目标 App，Gum 和 GumJS 就随之加载并运行在<strong>目标 App 进程内部</strong>。</p>
+                    <p>在 <code>Frida 17.27.5</code> 默认构建中，它<strong>不会</strong>以独立的 <code>libfrida-gum.so</code> 出现在手机里，而是直接<strong>静态链接进 <code>frida-agent.so</code></strong>。因此只要 <code>agent.so</code> 被注入目标 App，Gum 和 GumJS 就随之加载并运行在<strong>目标 App 进程内部</strong>。</p>
                   </div>
                   <div class="dim-box wide">
                     <span class="dim-label">② 编译产出 &amp; ③ 原本是干什么的</span>
@@ -1398,9 +1397,9 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
                 <div class="sp-foot">
                   <span>它在第 1 节 Demo 里的角色：在 App 内部直接跑起 <code>hook.js</code>，并提供底层原生操作能力。</span>
                   <div class="sp-foot-links">
-                    <a href="https://github.com/frida/frida-gum/blob/45e176dbafaccaa351d09b1836a8a8e16981113c/bindings/gumjs/meson.build#L27">gumjs/meson.build</a>
-                    <a href="https://github.com/frida/releng/blob/f7ba343c9acb19b3b333a8bc5cefd110b550cd9d/meson_configure.py#L90">默认静态链接配置</a>
-                    <a href="https://github.com/frida/frida-gum/blob/4bfc43f0b7f93b6d03d732d221d471d6c6ed7976/bindings/gumjs/runtime/console.js#L46">console.js L46</a>
+                    <a href="https://github.com/frida/frida-gum/blob/dd74ec096ee1eaee9eea2d8cd363ae7d944b5dd4/bindings/gumjs/meson.build">gumjs/meson.build</a>
+                    <a href="https://github.com/frida/releng/blob/f66bd2f4a5159f93771587de221df88e2f99be60/meson_configure.py">releng 构建配置</a>
+                    <a href="https://github.com/frida/frida-gum/blob/dd74ec096ee1eaee9eea2d8cd363ae7d944b5dd4/bindings/gumjs/runtime/console.js#L45">console.js L45</a>
                   </div>
                 </div>
               </div>
@@ -1412,10 +1411,10 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
                 <div class="sp-title">
                   <span class="sp-index">5</span>
                   <h3><code>frida-java-bridge</code></h3>
-                  <span class="sp-role">Android Java / ART 桥接层（关键补充项目）</span>
+                  <span class="sp-role">Android Java / ART 桥接层（独立官方包）</span>
                 </div>
                 <div class="sp-pills">
-                  <span class="pill">JavaScript（经 Gum 调 JNI / ART）</span>
+                  <span class="pill">JavaScript（v7.1.0，经 Gum 调 JNI / ART）</span>
                   <span class="pill app">运行于：目标 App 进程</span>
                 </div>
               </header>
@@ -1423,19 +1422,19 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
                 <div class="dim-grid">
                   <div class="dim-box">
                     <span class="dim-label">① 使用语言</span>
-                    <p><strong>JavaScript</strong>（独立仓库位于 <code>frida-packages/frida-java-bridge</code>）。它本身不编成 <code>.so</code>，而是借助 GumJS 暴露的 <code>NativeFunction</code>、<code>Memory</code>、<code>Interceptor</code> 直接和进程里的 <code>libart.so</code> / JNI 交互。</p>
+                    <p><strong>JavaScript</strong>（独立仓库位于 <code>frida-packages/frida-java-bridge</code>，最新 <code>v7.1.0</code>）。它本身不编成 <code>.so</code>，而是借助 GumJS 暴露的 <code>NativeFunction</code>、<code>Memory</code>、<code>Interceptor</code> 直接和进程里的 <code>libart.so</code> / JNI 交互。</p>
                   </div>
                   <div class="dim-box">
                     <span class="dim-label">④ 怎么被加载、运行在哪里</span>
-                    <p><strong>Frida 16.4.7：</strong>打包在 GumJS 运行时内（<code>bindings/gumjs/runtime/java.js</code>），脚本一启动就自动挂出全局 <code>Java</code> 对象，运行在<strong>目标 App 进程的 JS 引擎里</strong>。<br><strong>Frida 17.0+：</strong>官方把 Bridge 拆出运行时变为独立 npm/JS 包（<code>frida-tools</code> CLI 默认仍预装，自建 agent 需按需引入）。</p>
+                    <p><strong>Frida 17 起</strong>，官方把 Bridge 从 GumJS 运行时拆出为独立包：当你用 <code>frida</code> CLI 或 <code>frida-trace</code> 时，<code>frida-tools</code> 通过 <code>frida:load-bridge</code> 自动把预装的 <code>bridges/java.js</code> 送入<strong>目标 App 进程的 JS 引擎</strong>并挂出全局 <code>Java</code>；如果是自写 TypeScript/Node Agent，则通过 npm 显式 <code>import Java from "frida-java-bridge"</code> 打包进去。</p>
                   </div>
                   <div class="dim-box wide">
                     <span class="dim-label">② 打包产出 &amp; ③ 原本是干什么的</span>
                     <ul class="artifact-list">
                       <li class="artifact-item">
                         <div class="artifact-item-top">
-                          <strong>Java Bridge JS 运行时包（提供 <code>Java.*</code> API）</strong>
-                          <span class="tag-static">16.4.7 随 GumJS 打包进 agent.so</span>
+                          <strong>Java Bridge 独立 JS 包（提供 <code>Java.*</code> API）</strong>
+                          <span class="tag-static">Frida 17 由 CLI 预装按需加载 / npm 引入</span>
                         </div>
                         实现第 1 节脚本里的 <code>Java.perform()</code>、<code>Java.use()</code> 和 <code>.implementation = ...</code>。当你给 <code>onResume.implementation</code> 赋值时，由它内部的 <code>class-factory.js</code> 和 <code>ArtMethodMangler</code> 在目标 App 的 ART 虚拟机上完成方法接管。
                       </li>
@@ -1445,9 +1444,9 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
                 <div class="sp-foot">
                   <span>它在第 1 节 Demo 里的角色：让纯 JS 脚本能看懂 Android 的类与 ART 方法，并把 <code>onResume()</code> 接到你的回调。</span>
                   <div class="sp-foot-links">
-                    <a href="https://github.com/frida/frida-gum/blob/4bfc43f0b7f93b6d03d732d221d471d6c6ed7976/bindings/gumjs/runtime/java.js">GumJS java.js</a>
-                    <a href="https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/index.js#L371">Java.perform L371</a>
-                    <a href="https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/lib/android.js#L3359">ArtMethodMangler L3359</a>
+                    <a href="https://github.com/frida/frida-tools/blob/47723728bda875d40ca5adb26a1596ac01e4f855/frida_tools/application.py#L989-L1007">CLI 加载 Bridge</a>
+                    <a href="https://github.com/frida-packages/frida-java-bridge/blob/f9d1620947f926fa0f5c8ba2095666be74fb2e36/index.js#L366">Java.perform L366</a>
+                    <a href="https://github.com/frida-packages/frida-java-bridge/blob/f9d1620947f926fa0f5c8ba2095666be74fb2e36/lib/android.js#L3739">ArtMethodMangler L3739</a>
                     <a href="https://frida.re/news/2025/05/17/frida-17-0-0-released/">Frida 17 拆包说明</a>
                   </div>
                 </div>
@@ -1511,14 +1510,14 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
                   <td><code>frida-gum</code></td>
                   <td>C / C++（QuickJS / V8）</td>
                   <td>执行 <code>hook.js</code>，提供原生拦截（Interceptor）、内存/符号读写与日志编码</td>
-                  <td>16.4.7 默认<strong>静态链接进 <code>frida-agent.so</code></strong>，随 agent 运行于<strong>目标 App PID</strong></td>
+                  <td><code>17.27.5</code> 默认<strong>静态链接进 <code>frida-agent.so</code></strong>，随 agent 运行于<strong>目标 App PID</strong></td>
                 </tr>
                 <tr data-loc="app">
                   <th scope="row">Java Bridge（<code>Java.*</code>）</th>
                   <td><code>frida-java-bridge</code></td>
-                  <td>JavaScript</td>
+                  <td>JavaScript（<code>v7.1.0</code>）</td>
                   <td>提供 <code>Java.perform/use</code>，通过 JNI 与 ART 交互完成 Java 方法 Hook</td>
-                  <td>16.4.7 随 GumJS 运行时加载（17+ 独立包），运行于<strong>目标 App PID 的 JS 引擎</strong></td>
+                  <td>Frida 17 独立拆包：CLI 经 <code>frida:load-bridge</code> 按需送入<strong>目标 App PID 的 JS 引擎</strong></td>
                 </tr>
                 <tr data-loc="app">
                   <th scope="row"><code>frida-gadget.so</code> <span class="tag-muted">本例未用</span></th>
@@ -1667,21 +1666,21 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
 
           <div class="index-box">
             <div class="index-group">
-              <h3>主仓库与构建系统（<code>frida/frida @ a93582c</code>）</h3>
+              <h3>主仓库与构建系统（<code>frida/frida @ 17.27.5</code> · <code>bbb7e229</code>）</h3>
               <ul class="index-list">
-                <li><a href="https://github.com/frida/frida/tree/a93582c832d74de1eaa0ec59994365f6981368db">frida/frida 根目录</a> · <a href="https://github.com/frida/frida/blob/a93582c832d74de1eaa0ec59994365f6981368db/.gitmodules">.gitmodules</a> · <a href="https://github.com/frida/frida/tree/a93582c832d74de1eaa0ec59994365f6981368db/subprojects">subprojects/</a> · <a href="https://github.com/frida/frida/blob/a93582c832d74de1eaa0ec59994365f6981368db/meson.build">meson.build</a></li>
-                <li><a href="https://github.com/frida/releng/tree/a5250c7ee39ee20a0169c256f4a33e5a8d027d5c">frida/releng</a> · <a href="https://github.com/frida/frida/blob/a93582c832d74de1eaa0ec59994365f6981368db/tools/ensure-submodules.py">tools/ensure-submodules.py</a> · <a href="https://github.com/frida/releng/blob/f7ba343c9acb19b3b333a8bc5cefd110b550cd9d/meson_configure.py#L90">默认静态链接配置</a></li>
+                <li><a href="https://github.com/frida/frida/tree/17.27.5">frida/frida 17.27.5 根目录</a> · <a href="https://github.com/frida/frida/blob/17.27.5/.gitmodules">.gitmodules</a> · <a href="https://github.com/frida/frida/tree/17.27.5/subprojects">subprojects/</a> · <a href="https://github.com/frida/frida/blob/17.27.5/meson.build">meson.build</a></li>
+                <li><a href="https://github.com/frida/releng/tree/f66bd2f4a5159f93771587de221df88e2f99be60">frida/releng</a> · <a href="https://github.com/frida/frida/blob/17.27.5/tools/ensure-submodules.py">tools/ensure-submodules.py</a></li>
               </ul>
             </div>
 
             <div class="index-group">
-              <h3>五个核心子项目的构建与入口锚点（<code>Frida 16.4.7</code> / <code>frida-tools 12.5.0</code>）</h3>
+              <h3>五个核心子项目的构建与入口锚点（<code>Frida 17.27.5</code> / <code>frida-java-bridge v7.1.0</code>）</h3>
               <ul class="index-list">
-                <li><code>frida-tools</code>：<a href="https://github.com/frida/frida-tools/blob/8c0338e8e16205f53e89ecc64e5c36211e1b3f08/pyproject.toml">pyproject.toml</a> · <a href="https://github.com/frida/frida-tools/blob/c1002d27b2c6b7aab39e2c74fbb20a255037f407/setup.py#L61">CLI 入口 L61</a> · <a href="https://github.com/frida/frida-tools/blob/c1002d27b2c6b7aab39e2c74fbb20a255037f407/frida_tools/application.py#L613">application.py L613</a></li>
-                <li><code>frida-python</code>：<a href="https://github.com/frida/frida-python/blob/7b56f289054bd0aea0d9fbe32cd7a04a2fb43617/frida/meson.build">meson.build</a> · <a href="https://github.com/frida/frida-python/blob/148ca1461d9b01a9643999540fb1fb64a984d355/frida/core.py#L1058">core.py L1058</a> · <a href="https://github.com/frida/frida-python/blob/148ca1461d9b01a9643999540fb1fb64a984d355/frida/_frida/extension.c#L2854">extension.c L2854</a></li>
-                <li><code>frida-core</code>：<a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/frida.vala#L1099">frida.vala L1099</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/droidy/droidy-host-session.vala#L165">ADB 通道 L165</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/server/server.vala#L201">server.vala L201</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L426">perform_attach_to L426</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/agent.vala#L767">agent.vala L767</a> · <a href="https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/payload/script-engine.vala#L87">script-engine L87</a></li>
-                <li><code>frida-gum</code>：<a href="https://github.com/frida/frida-gum/blob/45e176dbafaccaa351d09b1836a8a8e16981113c/bindings/gumjs/meson.build#L27">gumjs/meson.build</a> · <a href="https://github.com/frida/frida-gum/blob/4bfc43f0b7f93b6d03d732d221d471d6c6ed7976/bindings/gumjs/runtime/java.js">runtime/java.js</a> · <a href="https://github.com/frida/frida-gum/blob/4bfc43f0b7f93b6d03d732d221d471d6c6ed7976/bindings/gumjs/runtime/console.js#L46">console.js L46</a></li>
-                <li><code>frida-java-bridge</code>：<a href="https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/index.js#L371">Java.perform L371</a> · <a href="https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/lib/class-factory.js#L1720">class-factory L1720</a> · <a href="https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/lib/android.js#L3359">ArtMethodMangler L3359</a> · <a href="https://frida.re/news/2025/05/17/frida-17-0-0-released/">Frida 17.0.0 拆包说明</a></li>
+                <li><code>frida-tools</code>（<code>47723728</code>）：<a href="https://github.com/frida/frida-tools/blob/47723728bda875d40ca5adb26a1596ac01e4f855/pyproject.toml#L59">CLI 入口 L59</a> · <a href="https://github.com/frida/frida-tools/blob/47723728bda875d40ca5adb26a1596ac01e4f855/frida_tools/application.py#L750">attach L750</a> · <a href="https://github.com/frida/frida-tools/blob/47723728bda875d40ca5adb26a1596ac01e4f855/frida_tools/application.py#L989-L1007">加载 Bridge L989</a></li>
+                <li><code>frida-python</code>（<code>51c790e6</code>）：<a href="https://github.com/frida/frida-python/blob/51c790e6197622b21ccff628bf8120b38084f8d5/frida/meson.build">frida/meson.build</a> · <a href="https://github.com/frida/frida-python/tree/51c790e6197622b21ccff628bf8120b38084f8d5/frida/frida_bindgen">frida_bindgen/</a></li>
+                <li><code>frida-core</code>（<code>075600d9</code>）：<a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/frida.vala#L1598">frida.vala L1598</a> · <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/droidy/droidy-host-session.vala#L210">ADB 通道 L210</a> · <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/server/server.vala#L200">server.vala L200</a> · <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/linux/linux-host-session.vala#L407">perform_attach_to L407</a> · <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/lib/agent/agent.vala#L916">agent.vala L916</a> · <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/lib/payload/script-engine.vala#L89">script-engine L89</a></li>
+                <li><code>frida-gum</code>（<code>dd74ec09</code>）：<a href="https://github.com/frida/frida-gum/blob/dd74ec096ee1eaee9eea2d8cd363ae7d944b5dd4/bindings/gumjs/meson.build">gumjs/meson.build</a> · <a href="https://github.com/frida/frida-gum/blob/dd74ec096ee1eaee9eea2d8cd363ae7d944b5dd4/bindings/gumjs/runtime/console.js#L45">console.js L45</a></li>
+                <li><code>frida-java-bridge</code>（<code>v7.1.0</code> · <code>f9d16209</code>）：<a href="https://github.com/frida-packages/frida-java-bridge/blob/f9d1620947f926fa0f5c8ba2095666be74fb2e36/index.js#L366">Java.perform L366</a> · <a href="https://github.com/frida-packages/frida-java-bridge/blob/f9d1620947f926fa0f5c8ba2095666be74fb2e36/lib/class-factory.js#L1697">class-factory L1697</a> · <a href="https://github.com/frida-packages/frida-java-bridge/blob/f9d1620947f926fa0f5c8ba2095666be74fb2e36/lib/android.js#L3739">ArtMethodMangler L3739</a> · <a href="https://frida.re/news/2025/05/17/frida-17-0-0-released/">Frida 17.0.0 拆包说明</a></li>
               </ul>
             </div>
 
@@ -1794,7 +1793,7 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
         text: '你在 Windows 终端敲下命令，Python 启动 frida_tools.repl:main。CLI 解析 -U、-N com.example.demo 与 -l hook.js，把本地脚本内容读进内存，此时还没有触及手机里的任何进程。',
         code: '[frida-tools] frida -U -N com.example.demo -l hook.js\n  → frida_tools.repl:main → application.py 解析参数',
         refs: [
-          ['CLI 入口 L61', 'https://github.com/frida/frida-tools/blob/c1002d27b2c6b7aab39e2c74fbb20a255037f407/setup.py#L61']
+          ['CLI 入口 L59', 'https://github.com/frida/frida-tools/blob/47723728bda875d40ca5adb26a1596ac01e4f855/pyproject.toml#L59']
         ],
         live: ['box-host'],
         wires: [],
@@ -1812,12 +1811,12 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
       },
       {
         title: '第 2 步 · frida-python 经 _frida.pyd 调入静态链接的电脑端 frida-core',
-        text: 'CLI 拿到包名对应的 PID 后调用 self._device.attach(pid)。frida/core.py 转入同进程加载的 C 扩展 _frida.pyd，直接调用静态链接在其中的电脑端 frida-core 原生函数 frida_device_attach_sync()。',
-        code: '[frida-python → frida-core]\nself._device.attach(pid) → _frida.pyd (extension.c) → Device.attach()',
+        text: 'CLI 拿到包名对应的 PID 后调用 self._device.attach(pid)。由 frida-bindgen 生成的 Python 包装转入同进程加载的 C 扩展 _frida.pyd，直接调用静态链接在其中的电脑端 frida-core 原生函数。',
+        code: '[frida-python → frida-core]\nself._device.attach(pid) → _frida.pyd (frida-bindgen) → Device.attach()',
         refs: [
-          ['application.py#L613', 'https://github.com/frida/frida-tools/blob/c1002d27b2c6b7aab39e2c74fbb20a255037f407/frida_tools/application.py#L613'],
-          ['extension.c#L2854', 'https://github.com/frida/frida-python/blob/148ca1461d9b01a9643999540fb1fb64a984d355/frida/_frida/extension.c#L2854'],
-          ['frida.vala#L1099', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/frida.vala#L1099']
+          ['application.py#L750', 'https://github.com/frida/frida-tools/blob/47723728bda875d40ca5adb26a1596ac01e4f855/frida_tools/application.py#L750'],
+          ['frida_bindgen/', 'https://github.com/frida/frida-python/tree/51c790e6197622b21ccff628bf8120b38084f8d5/frida/frida_bindgen'],
+          ['frida.vala#L1598', 'https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/frida.vala#L1598']
         ],
         live: ['box-host'],
         wires: [],
@@ -1839,8 +1838,8 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
         code: '[frida-core 电脑端 ──ADB/D-Bus──▶ frida-server]\ndroidy-host-session.vala → 打开 ADB 通道 → 建立 D-Bus → attach(pid)',
         refs: [
           ['补充阅读：什么是 D-Bus？', 'frida-dbus-guide.html'],
-          ['打开 ADB 通道 L165', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/droidy/droidy-host-session.vala#L165'],
-          ['建立 D-Bus L897', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/droidy/droidy-host-session.vala#L897']
+          ['打开 ADB 通道 L210', 'https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/droidy/droidy-host-session.vala#L210'],
+          ['Android 附加 L645', 'https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/droidy/droidy-host-session.vala#L645']
         ],
         live: ['box-host', 'box-server'],
         wires: ['wire-adb'],
@@ -1861,8 +1860,8 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
         text: '独立运行在 Android 上的 frida-server 收到请求后，ControlService 转交 linux-host-session.vala：按包名确认 com.example.demo 的 PID，随后进入 perform_attach_to() 准备向该进程注入 agent。',
         code: '[frida-core 设备端 / frida-server]\nserver.vala → control-service.vala → linux-host-session::perform_attach_to(pid)',
         refs: [
-          ['server.vala#L201', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/server/server.vala#L201'],
-          ['perform_attach_to L426', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/src/linux/linux-host-session.vala#L426']
+          ['server.vala#L200', 'https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/server/server.vala#L200'],
+          ['perform_attach_to L407', 'https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/linux/linux-host-session.vala#L407']
         ],
         live: ['box-server'],
         wires: ['wire-adb'],
@@ -1883,8 +1882,9 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
         text: 'frida-server 调用注入器将 frida-agent.so 映射进目标 App 的地址空间，并建立服务端与 agent 之间的控制通道。因为 Gum 与 GumJS 已静态链接进 agent.so，目标 App 此刻已具备完整的脚本运行与插桩能力。',
         code: '[frida-server ──注入──▶ App PID]\nfrida-agent.so（静态链接 Gum + GumJS）载入 → agent.vala 打开会话',
         refs: [
-          ['agent 构建定义 L41', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/meson.build#L41'],
-          ['agent.vala#L767', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/agent/agent.vala#L767']
+          ['深入第二篇：自映射注入原理', 'frida-inject-guide.html'],
+          ['agent 构建定义 L64', 'https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/lib/agent/meson.build#L64'],
+          ['agent.vala#L916', 'https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/lib/agent/agent.vala#L916']
         ],
         live: ['box-server', 'box-app'],
         wires: ['wire-agent'],
@@ -1902,11 +1902,11 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
       },
       {
         title: '第 6 步 · hook.js 经会话送入 App，由 GumJS 引擎启动执行',
-        text: '电脑端把 hook.js 源码通过已建好的会话发给 App 内的 agent。script-engine.vala 收到源码后交给库内静态链接的 GumJS（QuickJS/V8）执行，同时挂载 Java Bridge（16.4.7 经 runtime/java.js）。',
-        code: '[CLI ──hook.js──▶ agent → script-engine.vala → GumJS]\n启动 QuickJS/V8 并提供全局 Java 对象',
+        text: '电脑端把 hook.js 源码通过已建好的会话发给 App 内的 agent。script-engine.vala 收到源码后交给库内静态链接的 GumJS（QuickJS/V8）执行，并由 frida-tools 通过 frida:load-bridge 按需下发 Java Bridge（v7.1.0）。',
+        code: '[CLI ──hook.js + java.js──▶ agent → script-engine.vala → GumJS]\n启动 QuickJS/V8 并按需加载 frida-java-bridge',
         refs: [
-          ['script-engine.vala#L87', 'https://github.com/frida/frida-core/blob/78ff6e5b086a53acd99ea8cf2c65dfd0baf998ab/lib/payload/script-engine.vala#L87'],
-          ['GumJS java.js', 'https://github.com/frida/frida-gum/blob/4bfc43f0b7f93b6d03d732d221d471d6c6ed7976/bindings/gumjs/runtime/java.js']
+          ['script-engine.vala#L89', 'https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/lib/payload/script-engine.vala#L89'],
+          ['CLI 加载 Bridge L989', 'https://github.com/frida/frida-tools/blob/47723728bda875d40ca5adb26a1596ac01e4f855/frida_tools/application.py#L989-L1007']
         ],
         live: ['box-app'],
         wires: ['wire-adb', 'wire-agent'],
@@ -1927,9 +1927,9 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
         text: 'hook.js 调用 Java.perform() 附着到 ART，Java.use("android.app.Activity") 构建类包装。给 onResume.implementation 赋值时，frida-java-bridge 借助 Gum 底层能力改写目标 ART 方法入口，并保留原方法句柄。',
         code: '[frida-java-bridge → ART]\nindex.js (Java.perform) → class-factory.js → lib/android.js (ArtMethodMangler)',
         refs: [
-          ['Java.perform L371', 'https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/index.js#L371'],
-          ['class-factory L1720', 'https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/lib/class-factory.js#L1720'],
-          ['ArtMethodMangler L3359', 'https://github.com/frida-packages/frida-java-bridge/blob/8d2e7d71c9e2f4226d508e7910e6c4c486cdccd7/lib/android.js#L3359']
+          ['Java.perform L366', 'https://github.com/frida-packages/frida-java-bridge/blob/f9d1620947f926fa0f5c8ba2095666be74fb2e36/index.js#L366'],
+          ['class-factory L1697', 'https://github.com/frida-packages/frida-java-bridge/blob/f9d1620947f926fa0f5c8ba2095666be74fb2e36/lib/class-factory.js#L1697'],
+          ['ArtMethodMangler L3739', 'https://github.com/frida-packages/frida-java-bridge/blob/f9d1620947f926fa0f5c8ba2095666be74fb2e36/lib/android.js#L3739']
         ],
         live: ['box-app'],
         wires: [],
@@ -1950,7 +1950,7 @@ adb shell "su -c 'chmod +x /data/local/tmp/frida-server &amp;&amp; /data/local/t
         text: 'App 切回前台触发 Activity.onResume()，执行流先进入我们的 JS 回调：console.log("onResume called") 经 GumJS 的 console.js 编成消息，依次经 agent → frida-server → ADB 回到电脑端 CLI 打印；随后 onResume.call(this) 执行原方法，界面正常恢复。',
         code: 'App 调用 onResume() → JS 回调\n  ├─ console.log() → console.js → agent → server → 终端: onResume called\n  └─ onResume.call(this) → 继续执行原 Activity.onResume()',
         refs: [
-          ['console.js#L46', 'https://github.com/frida/frida-gum/blob/4bfc43f0b7f93b6d03d732d221d471d6c6ed7976/bindings/gumjs/runtime/console.js#L46']
+          ['console.js#L45', 'https://github.com/frida/frida-gum/blob/dd74ec096ee1eaee9eea2d8cd363ae7d944b5dd4/bindings/gumjs/runtime/console.js#L45']
         ],
         live: ['box-app', 'box-server', 'box-host'],
         wires: ['wire-agent', 'wire-adb'],
