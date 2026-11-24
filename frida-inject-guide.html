@@ -785,6 +785,7 @@
           <a href="#overview" class="active"><span class="num">01</span>Frida 17 注入全景</a>
           <a href="#walkthrough"><span class="num">02</span>9 步注入交互演示</a>
           <a href="#source-deep"><span class="num">03</span>逐行源码拆解</a>
+          <a href="#s-selinux" class="sub">· 3.0 前置：SELinux 策略热补丁</a>
           <a href="#s-entry" class="sub">· 3.1 memfd 备弹与入口</a>
           <a href="#s-remotecall" class="sub">· 3.2 ptrace 与 RemoteCall</a>
           <a href="#s-bootstrap" class="sub">· 3.3 阶段一 bootstrapper</a>
@@ -823,22 +824,22 @@
 
           <div class="compare-pair">
             <article class="compare-box">
-              <h4>❌ 传统直调 <code>dlopen</code> 的四个死穴</h4>
+              <h4>❌ 传统直调 <code>dlopen</code> 为什么行不通？（硬门槛 vs 工程优化）</h4>
               <ul>
-                <li><strong>死锁与 ANR</strong>：被暂停的线程可能正持有 linker / malloc 锁，在 <code>ptrace</code> 停顿期间直接调 <code>dlopen</code> 极易死锁。</li>
-                <li><strong>Linker 登记与 Namespace 拦截</strong>：Android 7+ <code>__loader_dlopen</code> 会校验调用者地址所属 namespace；而且只要走了系统 <code>dlopen</code>，<code>frida-agent.so</code> 就会被写进 linker 的 <code>soinfo</code> / <code>r_debug</code> / <code>dl_iterate_phdr</code> 链表。</li>
-                <li><strong>SELinux 文件域限制</strong>：把 <code>.so</code> 落盘到 <code>/data/local/tmp</code> 极易被目标 App 的 SELinux 策略拒绝读取或 <code>PROT_EXEC</code>。</li>
-                <li><strong>老版 Zygote 注入过重</strong>：Frida 16 及以前做 <code>-f</code> Spawn 需要往 <code>zygote</code> 注入完整的 <code>frida-agent.so</code>。</li>
+                <li><strong>【最致命 · 硬拦截】SELinux 文件域与执行限制</strong>：在 Enforcing Android 上，<code>untrusted_app</code> 根本无权对 <code>/data/local/tmp</code>（<code>shell_data_file</code>）或未授权 FD 执行 <code>open/read/map/execute</code>，甚至无法分配匿名 <code>execmem</code>——<strong>这直接导致 <code>dlopen</code> 报 <code>EACCES</code> 彻底用不了</strong>（连 <code>memfd</code> 若不改策略也一样被拦）。</li>
+                <li><strong>【硬拦截】Android 7+ Linker Namespace 校验</strong>：<code>__loader_dlopen</code> 会检查调用者返回地址所属的 namespace，匿名可执行页里直接调会被 linker 拒绝加载系统依赖或外部库。</li>
+                <li><strong>【稳定性优化】<code>ptrace</code> 期间直调 <code>dlopen</code> 易死锁</strong>：被暂停的线程可能正持有 linker / malloc 锁，停顿期间做重操作极易死锁或触发 ANR。</li>
+                <li><strong>【隐蔽与轻量优化】Linker 登记与旧版 Zygote 过重</strong>：走系统 <code>dlopen</code> 会把 <code>frida-agent.so</code> 写入 <code>soinfo</code> / <code>dl_iterate_phdr</code> 链表；旧版 <code>-f</code> Spawn 还得往 <code>zygote</code> 注入完整 agent。</li>
               </ul>
             </article>
 
             <article class="compare-box real">
-              <h4>✅ Frida 17.27.5 的真实四重破局</h4>
+              <h4>✅ Frida 17.27.5 的真实解法（先打通权限，再做架构演进）</h4>
               <ul>
-                <li><strong><code>ptrace</code> 秒退主线程</strong>：<code>frida_load()</code> 只执行 1 行 <code>pthread_create()</code> 就立刻返回并 <code>DETACH</code>，耗时加载全在独立后台 <code>worker</code> 线程中完成。</li>
-                <li><strong>默认 <code>HAVE_MAPPER</code> 自映射（核心新特性）</strong>：<code>meson.build:1019</code> 对 Linux/Android 默认开启 <code>HAVE_MAPPER</code>——<code>frida-server</code> 在服务端算好重定位，遥控 <code>loader</code> 用 <code>mmap/mprotect</code> + ARM64 刷 I-Cache 直接把 <code>frida-agent.so</code> 映射执行，<strong>不经过系统 <code>dlopen</code>，不进入 linker <code>soinfo</code> 链表</strong>！</li>
-                <li><strong><code>memfd</code> + <code>SCM_RIGHTS</code> 零落盘</strong>：<code>agent.so</code> 塞进匿名内存文件 <code>memfd</code> 跨进程传入；需要加载系统依赖库（或非 Mapper 回退模式）时，仍把 <code>caller_addr</code> 伪装成 <code>libc-&gt;close</code> 合法借用系统默认 namespace。</li>
-                <li><strong><code>Zymbiote</code> 极轻量 Spawn</strong>：做 <code>-f</code> 冷启动时不再往 <code>zygote/usap</code> 注入完整 agent，而是直接 <code>SIGSTOP</code> 补丁 <code>android.os.Process.setArgV0()</code>。</li>
+                <li><strong>先破 SELinux 生死关（<code>lib/selinux/patch.c</code>）</strong>：<code>frida-server</code> 启动时直接读 <code>/sys/fs/selinux/policy</code>，注入 <code>frida_file</code> / <code>frida_memfd</code> 类型与 <code>execmem</code> / <code>execute</code> / <code>fd use</code> 规则后写回 <code>/sys/fs/selinux/load</code>，再给 <code>memfd</code> 打上 <code>u:object_r:frida_memfd:s0</code> 标签。</li>
+                <li><strong>再绕 Linker Namespace</strong>：调用 Android linker 加载系统依赖（或非 Mapper 回退调 <code>dlopen</code>）时，把 <code>caller_addr</code> 伪装成 <code>libc-&gt;close</code> 地址，合法借用系统默认 namespace。</li>
+                <li><strong>秒退主线程 + 默认 <code>HAVE_MAPPER</code> 自映射</strong>：<code>frida_load()</code> 只执行 1 行 <code>pthread_create()</code> 即立刻 <code>DETACH</code>；后台线程默认走 <code>frida_map_agent()</code> 手工 <code>mmap/mprotect</code> + ARM64 刷 I-Cache，<strong>绕过系统 <code>dlopen</code>，零 <code>soinfo</code> 登记</strong>。</li>
+                <li><strong><code>Zymbiote</code> 极轻量 Spawn</strong>：<code>-f</code> 冷启动不再往 <code>zygote/usap</code> 注入完整 agent，只 <code>SIGSTOP</code> 补丁 <code>android.os.Process.setArgV0()</code>。</li>
               </ul>
             </article>
           </div>
@@ -948,6 +949,44 @@
           <p class="chapter-kicker">03 / Line-by-Line Source Walkthrough</p>
           <h2>逐行源码拆解（<code>frida-core @ 075600d9</code> · Frida 17.27.5）</h2>
           <p class="lead">下面所有代码片段与行号均直接核验自 <strong>Frida <code>17.27.5</code></strong> 对应的 <code>frida/frida-core @ 075600d9</code> 提交。每一段先交代“上一棒怎么交接进来”，再精读关键行，最后指向下一棒。</p>
+
+          <!-- 3.0 -->
+          <h3 id="s-selinux">3.0 前置前提：SELinux 策略热补丁（打通 <code>dlopen</code> 与 <code>mmap(PROT_EXEC)</code> 生死关）</h3>
+          <p>在开始任何一次 <code>ptrace</code> 注入之前，有一个<strong>决定“能不能跑通”的最硬前置条件</strong>：Android Enforcing SELinux。即使不落盘到 <code>/data/local/tmp</code> 改用 <code>memfd</code>，匿名 <code>memfd</code> 依然是受 SELinux 管控的内核文件对象；如果不放行策略，目标 <code>untrusted_app</code> 既不能 <code>execmem</code> 申请 RWX 内存，也不能对传过来的 FD 执行 <code>use / map / execute</code>，后续的 <code>dlopen</code> 和 <code>frida_map_agent()</code> 都会直接 <code>EACCES</code> 失败。</p>
+          <p>因此 <code>frida-server</code> 在 Android 上启动时，会先调用 <code>frida_selinux_patch_policy()</code>（<code>lib/selinux/patch.c</code>）直接热修改内核 SELinux 策略库并写回 <code>/sys/fs/selinux/load</code>，随后 <code>linjector.vala</code> 再把每个 <code>memfd</code>（或回退临时文件）标记为对应的自定义类型：</p>
+
+          <figure class="source-excerpt">
+            <div class="source-filebar">
+              <strong><code>lib/selinux/patch.c</code> &amp; <code>src/linux/linjector.vala</code></strong>
+              <span class="source-ranges">
+                <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/lib/selinux/patch.c#L39-L54">规则表 L39–54</a>
+                <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/lib/selinux/patch.c#L85-L97">新增类型 L85–97</a>
+                <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/lib/selinux/patch.c#L147">写回内核 L147</a>
+                <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/linux/linjector.vala#L272-L283">打标签 L272–283</a>
+              </span>
+            </div>
+            <div class="source-metadata"><span>frida/frida-core · 075600d9 (v17.27.5)</span><code>lib/selinux/patch.c</code> · <code>src/linux/linjector.vala</code></div>
+            <div class="source-context"><strong>所在函数</strong><code>frida_selinux_patch_policy()</code> · <code>adjust_fd_permissions()</code></div>
+            <pre><code><span class="source-note"><span class="source-note-label">放行规则</span><span>patch.c：向所有进程域 (domain) 放行匿名可执行内存 execmem、frida_file/frida_memfd 映射执行，以及跨进程 fd use 与 unix socket 通信。</span></span>  39 │ static const FridaSELinuxRule frida_selinux_rules[] =
+  40 │ {
+  41 │   { { "domain", NULL }, "domain", "process", { "execmem", NULL } },
+  42 │   { { "domain", NULL }, "frida_file", "dir", { "search", NULL } },
+  43 │   { { "domain", NULL }, "frida_file", "file", { "open", "read", "getattr", "execute", "?map", NULL } },
+  44 │   { { "domain", NULL }, "frida_memfd", "file", { "open", "read", "write", "getattr", "execute", "?map", NULL } },
+     …
+  48 │   { { "domain", NULL }, "$self", "fd", { "use", NULL } },
+  49 │   { { "domain", NULL }, "$self", "unix_stream_socket", { "connectto", "read", "write", "getattr", "getopt", NULL } },
+     …
+<span class="source-note"><span class="source-note-label">热加载</span><span>加上 mlstrustedobject 属性绕开 MLS 多级安全类别隔离，最后把新策略整块写入 /sys/fs/selinux/load 生效。</span></span>  85 │   frida_ensure_type (&amp;db, "frida_file", 2, "file_type", "mlstrustedobject", &amp;error);
+  92 │   frida_ensure_type (&amp;db, "frida_memfd", 2, "file_type", "mlstrustedobject", &amp;error);
+     …
+ 147 │   frida_save_policy ("/sys/fs/selinux/load", &amp;db, &amp;error);
+     …
+<span class="source-note"><span class="source-note-label">打标</span><span>linjector.vala：每次创建 memfd 或临时 .so 时打上对应自定义 SELinux 上下文，使其命中上面的放行规则。</span></span> 275 │   SELinux.setfilecon (path, "u:object_r:frida_file:s0");
+     …
+ 281 │   SELinux.fsetfilecon (fd.handle, "u:object_r:frida_memfd:s0");</code></pre>
+            <figcaption class="source-summary">SELinux 热补丁 + 自定义文件/FD 标签：不关 Enforcing 也能让目标 App 合法映射并执行 agent.so</figcaption>
+          </figure>
 
           <!-- 3.1 -->
           <h3 id="s-entry">3.1 入口接缝：<code>perform_attach_to()</code> 与 <code>memfd</code> 备弹</h3>
@@ -1351,11 +1390,12 @@
 
           <div class="index-box">
             <div class="index-group">
-              <h3>构建开关、服务端入口与 Zymbiote Spawn</h3>
+              <h3>SELinux 策略热补丁、构建开关、服务端入口与 Zymbiote Spawn</h3>
               <ul class="index-list">
+                <li><code>lib/selinux/patch.c</code>：<a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/lib/selinux/patch.c#L39-L54">SELinux 放行规则表（L39–54）</a> · <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/lib/selinux/patch.c#L59-L173">frida_selinux_patch_policy（L59–173）</a></li>
                 <li><code>meson.build</code>：<a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/meson.build#L1017-L1025">HAVE_MAPPER 默认开启条件（L1017–1025）</a> · <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/meson.build#L42-L45">zymbiote.elf 资源打包（L42–45）</a></li>
                 <li><code>src/linux/linux-host-session.vala</code>：<a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/linux/linux-host-session.vala#L407-L429">perform_attach_to（L407–429）</a> · <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/linux/linux-host-session.vala#L1541-L1678">RoboLauncher.spawn &amp; 进程匹配（L1541–1678）</a> · <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/linux/linux-host-session.vala#L1717-L1760">inject_zymbiote（L1717–1760）</a></li>
-                <li><code>src/linux/linjector.vala</code>：<a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/linux/linjector.vala#L84-L114">inject_library_resource / memfd（L84–114）</a></li>
+                <li><code>src/linux/linjector.vala</code>：<a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/linux/linjector.vala#L84-L114">inject_library_resource / memfd（L84–114）</a> · <a href="https://github.com/frida/frida-core/blob/075600d94f1a78c389c5da7d81dd72077e3de85d/src/linux/linjector.vala#L265-L283">SELinux setfilecon / fsetfilecon（L265–283）</a></li>
               </ul>
             </div>
 
