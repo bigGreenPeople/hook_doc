@@ -695,6 +695,218 @@
       gap: 14px;
       margin: 18px 0;
     }
+
+    /* SELinux Visual Diagrams */
+    .selinux-viz {
+      margin: 20px 0 22px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--paper);
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(22, 35, 56, 0.04);
+    }
+    .selinux-viz-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 16px;
+      background: #f5f8fd;
+      border-bottom: 1px solid var(--line);
+    }
+    .selinux-viz-head strong {
+      font-size: 14.5px;
+      color: var(--ink);
+    }
+    .selinux-toggle {
+      display: inline-flex;
+      gap: 6px;
+    }
+    .selinux-toggle button {
+      cursor: pointer;
+      padding: 5px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--sub);
+      font: 600 12.5px var(--sans);
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .selinux-toggle button:hover { background: #edf3fb; color: var(--ink); }
+    .selinux-toggle button.is-blocked {
+      background: #fdecec;
+      border-color: #d95c5c;
+      color: #a61e1e;
+    }
+    .selinux-toggle button.is-patched {
+      background: var(--teal-soft);
+      border-color: var(--teal);
+      color: var(--teal);
+    }
+    .selinux-viz-body {
+      padding: 16px 18px;
+    }
+    /* Pipeline diagram (Fig 1) */
+    .se-pipe {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 22px minmax(0, 1fr) 22px minmax(0, 1fr) 22px minmax(0, 1fr);
+      gap: 6px;
+      align-items: stretch;
+    }
+    .se-step {
+      padding: 12px 12px 13px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #f9fbff;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .se-step.is-kernel {
+      border-color: #9ec0f3;
+      background: var(--blue-soft);
+    }
+    .se-step.is-tag {
+      border-color: #9ed7ca;
+      background: var(--teal-soft);
+    }
+    .se-step .se-num {
+      display: inline-block;
+      margin-bottom: 5px;
+      font: 700 11px var(--mono);
+      color: var(--blue);
+    }
+    .se-step.is-tag .se-num { color: var(--teal); }
+    .se-step b {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 14px;
+      color: var(--ink);
+    }
+    .se-step span { color: var(--sub); display: block; }
+    .se-arr {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font: 700 18px var(--mono);
+      color: var(--blue);
+    }
+    /* Gate diagram (Fig 2) */
+    .se-gate-grid {
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr) 200px;
+      gap: 14px;
+      align-items: stretch;
+    }
+    .se-actor {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f8fafd;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 6px;
+      font-size: 13px;
+    }
+    .se-actor.target {
+      border-color: #f0caa9;
+      background: #fffaf5;
+    }
+    .se-actor.kernel-obj {
+      border-color: #b7ded4;
+      background: #f3faf7;
+    }
+    .se-actor .se-tag-pill {
+      display: inline-block;
+      align-self: flex-start;
+      padding: 2px 7px;
+      border-radius: 5px;
+      background: #fff;
+      border: 1px solid var(--line);
+      font: 700 11px var(--mono);
+      color: var(--ink);
+    }
+    .se-actor strong { font-size: 14.5px; color: var(--ink); }
+    .se-actor p { margin: 0; font-size: 12.8px; color: var(--sub); line-height: 1.5; }
+
+    .se-wall {
+      padding: 12px 14px;
+      border: 2px dashed #d95c5c;
+      border-radius: 10px;
+      background: #fff7f7;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .se-wall.patched {
+      border-color: var(--teal);
+      background: #f2fbf8;
+    }
+    .se-wall-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #a61e1e;
+    }
+    .se-wall.patched .se-wall-title { color: var(--teal); }
+    .se-wall-badge {
+      padding: 2px 8px;
+      border-radius: 999px;
+      font: 700 11.5px var(--mono);
+      background: #fde2e2;
+      color: #a61e1e;
+    }
+    .se-wall.patched .se-wall-badge {
+      background: #d7f2ea;
+      color: var(--teal);
+    }
+    .se-gates {
+      display: grid;
+      gap: 8px;
+    }
+    .se-gate-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 11px;
+      border: 1px solid #f2c6c6;
+      border-radius: 7px;
+      background: #fff;
+      font-size: 13px;
+      transition: border-color 0.2s;
+    }
+    .se-wall.patched .se-gate-row { border-color: #bfe4d8; }
+    .se-gate-row b { display: block; color: var(--ink); font-size: 13.5px; }
+    .se-gate-row small { display: block; color: var(--sub); font-size: 12px; margin-top: 2px; }
+    .se-verdict {
+      padding: 3px 9px;
+      border-radius: 6px;
+      font: 700 12px var(--mono);
+      background: #fde2e2;
+      color: #a61e1e;
+      white-space: nowrap;
+    }
+    .se-wall.patched .se-verdict {
+      background: #d7f2ea;
+      color: var(--teal);
+    }
+    .selinux-viz-foot {
+      margin: 0;
+      padding: 10px 16px;
+      border-top: 1px solid var(--line-soft);
+      background: #fafcfe;
+      font-size: 13px;
+      color: var(--sub);
+    }
+    @media (max-width: 900px) {
+      .se-pipe { grid-template-columns: 1fr; }
+      .se-arr { transform: rotate(90deg); padding: 2px 0; }
+      .se-gate-grid { grid-template-columns: 1fr; }
+    }
     .trace-card {
       padding: 16px 18px;
       border: 1px solid var(--line);
@@ -952,8 +1164,142 @@
 
           <!-- 3.0 -->
           <h3 id="s-selinux">3.0 前置前提：SELinux 策略热补丁（打通 <code>dlopen</code> 与 <code>mmap(PROT_EXEC)</code> 生死关）</h3>
-          <p>在开始任何一次 <code>ptrace</code> 注入之前，有一个<strong>决定“能不能跑通”的最硬前置条件</strong>：Android Enforcing SELinux。即使不落盘到 <code>/data/local/tmp</code> 改用 <code>memfd</code>，匿名 <code>memfd</code> 依然是受 SELinux 管控的内核文件对象；如果不放行策略，目标 <code>untrusted_app</code> 既不能 <code>execmem</code> 申请 RWX 内存，也不能对传过来的 FD 执行 <code>use / map / execute</code>，后续的 <code>dlopen</code> 和 <code>frida_map_agent()</code> 都会直接 <code>EACCES</code> 失败。</p>
-          <p>因此 <code>frida-server</code> 在 Android 上启动时，会先调用 <code>frida_selinux_patch_policy()</code>（<code>lib/selinux/patch.c</code>）直接热修改内核 SELinux 策略库并写回 <code>/sys/fs/selinux/load</code>，随后 <code>linjector.vala</code> 再把每个 <code>memfd</code>（或回退临时文件）标记为对应的自定义类型：</p>
+          <p>在开始任何一次 <code>ptrace</code> 注入之前，有一个<strong>决定“能不能跑通”的最硬前置条件</strong>：Android Enforcing SELinux。你可以把 SELinux 理解成 Android 的<strong>“内核级门禁系统”</strong>——传统 Linux 只看谁是 root（UID=0），但 SELinux 会给每个进程贴身份标签（如普通 App 是 <code>untrusted_app</code>），也给每个文件、<code>memfd</code>、Socket 贴物品标签。哪怕 <code>frida-server</code> 本身是 root，<strong>注入动作最终是让目标 App 自己去映射代码、用 FD、连 Socket</strong>；只要目标 App 的标签不在内核白名单里，内核照样直接一巴掌拦截并返回 <code>EACCES</code>。</p>
+          <p>如果不先修 SELinux，整个注入链路会在下面 <strong>4 道门禁</strong> 上当场撞墙，而 <code>frida-server</code> 启动时调用的 <code>frida_selinux_patch_policy()</code>（<code>lib/selinux/patch.c</code>）正是逐一精准把这 4 扇门打开：</p>
+
+          <!-- 图 1：启动期热修改 SELinux 策略流程 -->
+          <figure class="selinux-viz" aria-label="Frida SELinux 策略热补丁四步流程图">
+            <div class="selinux-viz-head">
+              <strong>图 1 · <code>frida-server</code> 如何不关 Enforcing 热修改内核 SELinux 白名单</strong>
+              <span class="muted">静态内嵌 <code>libsepol</code> · 纯内存生效</span>
+            </div>
+            <div class="selinux-viz-body">
+              <div class="se-pipe">
+                <div class="se-step">
+                  <span class="se-num">STEP 1 · 读取</span>
+                  <b>读出当前内核策略</b>
+                  <span>以 root 权限读取 <code>/sys/fs/selinux/policy</code> 二进制策略库</span>
+                </div>
+                <div class="se-arr" aria-hidden="true">→</div>
+                <div class="se-step">
+                  <span class="se-num">STEP 2 · 热改</span>
+                  <b>内存追加精准规则</b>
+                  <span>用内嵌 <code>libsepol</code> 新增 <code>frida_file</code> / <code>frida_memfd</code> 并追加 4 组放行规则</span>
+                </div>
+                <div class="se-arr" aria-hidden="true">→</div>
+                <div class="se-step is-kernel">
+                  <span class="se-num">STEP 3 · 写回</span>
+                  <b>整块写回内核生效</b>
+                  <span>写入 <code>/sys/fs/selinux/load</code>，内核立即热重载（全程保持 <strong>Enforcing</strong>）</span>
+                </div>
+                <div class="se-arr" aria-hidden="true">→</div>
+                <div class="se-step is-tag">
+                  <span class="se-num">STEP 4 · 打标</span>
+                  <b>注入时精准贴标签</b>
+                  <span><code>linjector</code> 给每个 <code>memfd</code> 贴上 <code>u:object_r:frida_memfd:s0</code> 命中放行</span>
+                </div>
+              </div>
+            </div>
+            <figcaption class="selinux-viz-foot">全过程不修改 <code>/system</code> / <code>/vendor</code> 分区，也不跑 <code>setenforce 0</code>；重启手机后内核自动恢复原厂策略。</figcaption>
+          </figure>
+
+          <!-- 图 2：4 道门禁打补丁前后交互对比 -->
+          <figure class="selinux-viz" aria-label="SELinux 4 道门禁打补丁前后对比图">
+            <div class="selinux-viz-head">
+              <strong>图 2 · 目标 App 穿越 4 道 SELinux 内核门禁（点击切换前后状态）</strong>
+              <div class="selinux-toggle" role="group" aria-label="切换 SELinux 补丁状态">
+                <button type="button" id="se-btn-before" class="is-blocked">打补丁前（默认拦截）</button>
+                <button type="button" id="se-btn-after">执行 patch.c 后（放行）</button>
+              </div>
+            </div>
+            <div class="selinux-viz-body">
+              <div class="se-gate-grid">
+                <div class="se-actor target">
+                  <span class="se-tag-pill">u:r:untrusted_app:s0</span>
+                  <strong>目标 App 进程</strong>
+                  <p>实际执行映射、用 FD、连 Socket 的主体。内核查的是<strong>它的身份标签</strong>，不是 <code>frida-server</code> 的 root UID。</p>
+                </div>
+
+                <div class="se-wall" id="se-wall">
+                  <div class="se-wall-title">
+                    <span>Linux 内核 SELinux 门禁检查</span>
+                    <span class="se-wall-badge" id="se-wall-badge">Enforcing · 未放行</span>
+                  </div>
+                  <div class="se-gates">
+                    <div class="se-gate-row">
+                      <div>
+                        <b>① <code>process:execmem</code>（L41）</b>
+                        <small>申请/映射匿名 RWX 可执行代码页（<code>bootstrapper</code> / <code>loader</code> / Gum 跳板）</small>
+                      </div>
+                      <span class="se-verdict" data-before="❌ EACCES" data-after="✅ ALLOW">❌ EACCES</span>
+                    </div>
+                    <div class="se-gate-row">
+                      <div>
+                        <b>② <code>frida_memfd:map / execute</code>（L44, L92）</b>
+                        <small>把 <code>frida-agent.so</code> 匿名 <code>memfd</code> 映射进内存并执行（含 <code>mlstrustedobject</code>）</small>
+                      </div>
+                      <span class="se-verdict" data-before="❌ EACCES" data-after="✅ ALLOW">❌ EACCES</span>
+                    </div>
+                    <div class="se-gate-row">
+                      <div>
+                        <b>③ <code>$self:fd use</code>（L48）</b>
+                        <small>接收并使用 <code>frida-server</code> 通过 <code>SCM_RIGHTS</code> 跨进程递来的 FD</small>
+                      </div>
+                      <span class="se-verdict" data-before="❌ EACCES" data-after="✅ ALLOW">❌ EACCES</span>
+                    </div>
+                    <div class="se-gate-row">
+                      <div>
+                        <b>④ <code>$self:unix_stream_socket</code>（L49）</b>
+                        <small>App 内 <code>agent.so</code> 反向连回 <code>frida-server</code> 建立第二段 D-Bus 通道</small>
+                      </div>
+                      <span class="se-verdict" data-before="❌ EACCES" data-after="✅ ALLOW">❌ EACCES</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="se-actor kernel-obj">
+                  <span class="se-tag-pill">frida_memfd / $self</span>
+                  <strong>内核对象 &amp; <code>frida-server</code></strong>
+                  <p>包含已贴 <code>frida_memfd</code> 标签的内存 <code>agent.so</code>、跨进程 FD 以及 <code>frida-server</code>（<code>$self</code> 域）监听的 Unix Socket。</p>
+                </div>
+              </div>
+            </div>
+            <figcaption class="selinux-viz-foot" id="se-viz-foot">当前视图：<strong>未打补丁的默认 Enforcing 状态</strong> —— 目标 <code>untrusted_app</code> 只要撞上任意一道门禁，注入就会立刻报 <code>EACCES</code> 失败。</figcaption>
+          </figure>
+
+          <div class="table-wrap">
+            <table class="data" aria-label="SELinux 四道门禁与 patch.c 放行规则对照">
+              <thead>
+                <tr>
+                  <th scope="col">注入时要干的事</th>
+                  <th scope="col">不修 SELinux 会怎样</th>
+                  <th scope="col"><code>patch.c</code> 补进去的放行规则</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">1. 在 App 内开辟可执行页（RWX）</th>
+                  <td>写入 <code>bootstrapper</code> / <code>loader</code> 或 Gum 跳板代码会触发 <code>execmem</code> 检查，普通 App 默认被禁</td>
+                  <td>放行 <code>domain → domain:process execmem</code>（L41），允许映射/执行匿名可执行内存</td>
+                </tr>
+                <tr>
+                  <th scope="row">2. 映射并执行 <code>agent.so</code> 的 <code>memfd</code></th>
+                  <td><code>untrusted_app</code> 无权 <code>map / execute</code> <code>frida-server</code> 创建的 <code>memfd</code> 或 <code>/data/local/tmp</code> 文件，且受 MLS 沙箱隔离</td>
+                  <td>注册专属类型 <code>frida_file</code> / <code>frida_memfd</code>（加 <code>mlstrustedobject</code> 破除沙箱隔离），放行 <code>open/read/map/execute</code>（L42–44、L85–92）；随后 <code>linjector</code> 给每个 <code>memfd</code> 贴上 <code>frida_memfd</code> 标签</td>
+                </tr>
+                <tr>
+                  <th scope="row">3. 跨进程把 FD 递给目标 App</th>
+                  <td>SELinux 连“借用其他进程传来的 FD”都要查权限，不放行则 <code>SCM_RIGHTS</code> 传过去的 FD 无法使用</td>
+                  <td>放行 <code>domain → $self:fd use</code>（L48，<code>$self</code> 即 <code>frida-server</code> 自身域）</td>
+                </tr>
+                <tr>
+                  <th scope="row">4. App 内 <code>agent.so</code> 连回 <code>frida-server</code></th>
+                  <td>Android 严禁普通 App 连接高权限进程（如 <code>su</code> 域）的 Unix Stream Socket，第二段 D-Bus 通道建不起来</td>
+                  <td>放行 <code>domain → $self:unix_stream_socket { connectto read write ... }</code>（L49）</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
           <figure class="source-excerpt">
             <div class="source-filebar">
@@ -987,6 +1333,11 @@
  281 │   SELinux.fsetfilecon (fd.handle, "u:object_r:frida_memfd:s0");</code></pre>
             <figcaption class="source-summary">SELinux 热补丁 + 自定义文件/FD 标签：不关 Enforcing 也能让目标 App 合法映射并执行 agent.so</figcaption>
           </figure>
+
+          <div class="callout teal">
+            <p><strong>为什么不直接 <code>setenforce 0</code> 关掉 SELinux，而要费劲打热补丁？</strong></p>
+            <p>粗暴执行 <code>setenforce 0</code> 会把整台手机降为 Permissive，动静极大——很多 App 的安全检测只要查一下 <code>getenforce</code> 发现不是 Enforcing 就直接闪退或报环境异常。Frida 的做法非常外科手术式：<code>frida-server</code> 连解析/修改策略二进制的 <strong><code>libsepol</code></strong> 都静态编进了自身，无需依赖外部 <code>magiskpolicy</code>；启动时直接从 <code>/sys/fs/selinux/policy</code> 读出当前策略、仅追加上述 4 组白名单规则，再整块写回 <code>/sys/fs/selinux/load</code> 热加载生效——<strong>手机表面保持 Enforcing、不改系统分区、重启即恢复原状</strong>，同时把注入和通信的 4 扇门全部合法打开。</p>
+          </div>
 
           <!-- 3.1 -->
           <h3 id="s-entry">3.1 入口接缝：<code>perform_attach_to()</code> 与 <code>memfd</code> 备弹</h3>
@@ -1790,6 +2141,31 @@
     }
 
     render(false);
+
+    // 4. SELinux Gate Before/After Toggle
+    const seWall = byId('se-wall');
+    const seBadge = byId('se-wall-badge');
+    const seFoot = byId('se-viz-foot');
+    const seBtnBefore = byId('se-btn-before');
+    const seBtnAfter = byId('se-btn-after');
+    if (seWall && seBtnBefore && seBtnAfter) {
+      const verdicts = [...seWall.querySelectorAll('.se-verdict')];
+      function setSeMode(patched) {
+        seWall.classList.toggle('patched', patched);
+        seBtnBefore.classList.toggle('is-blocked', !patched);
+        seBtnAfter.classList.toggle('is-patched', patched);
+        seBadge.textContent = patched ? 'Enforcing · 已热补丁放行' : 'Enforcing · 未放行';
+        verdicts.forEach(el => {
+          el.textContent = patched ? el.dataset.after : el.dataset.before;
+        });
+        seFoot.innerHTML = patched
+          ? '当前视图：<strong>执行 <code>patch.c</code> 热补丁后</strong> —— 系统仍保持 <code>Enforcing</code>，但目标 App 走这 4 道门禁全部命中白名单合法放行。'
+          : '当前视图：<strong>未打补丁的默认 Enforcing 状态</strong> —— 目标 <code>untrusted_app</code> 只要撞上任意一道门禁，注入就会立刻报 <code>EACCES</code> 失败。';
+      }
+      seBtnBefore.addEventListener('click', () => setSeMode(false));
+      seBtnAfter.addEventListener('click', () => setSeMode(true));
+      setSeMode(true);
+    }
   </script>
 </body>
 </html>
