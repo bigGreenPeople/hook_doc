@@ -1108,17 +1108,17 @@
         <a class="back-home" href="index.html">← 返回文档索引</a>
         <div class="side-title">本篇目录</div>
         <nav class="toc" id="toc">
-          <a href="#overview" class="active"><span class="num">01</span>第一部分：7 步主干动作总流程</a>
-          <a href="#walkthrough"><span class="num">02</span>9 步寄存器与内存交互沙盘</a>
+          <a href="#overview" class="active"><span class="num">01</span>第一部分：整体主干流程（要做什么）</a>
+          <a href="#walkthrough"><span class="num">02</span>交互沙盘：动态看 7 步流程</a>
           <a href="#source-deep"><span class="num">03</span>第二部分：逐动作展开技术细节</a>
-          <a href="#s-selinux" class="sub">· 节点 0：热修改 SELinux 白名单</a>
-          <a href="#s-entry" class="sub">· 动作 1：ptrace 附加进程并备份现场</a>
-          <a href="#s-remotecall" class="sub">· 动作 2：改寄存器调 mmap 开辟内存</a>
-          <a href="#s-bootstrap" class="sub">· 动作 3：写入并执行 bootstrapper.bin</a>
-          <a href="#s-loader" class="sub">· 动作 4：覆盖写入 loader.bin 秒退主线程</a>
-          <a href="#s-memfd" class="sub">· 动作 5：memfd + SCM_RIGHTS 传 SO</a>
-          <a href="#s-mapper" class="sub">· 动作 6：后台线程自映射执行 agent.so</a>
-          <a href="#s-agent" class="sub">· 动作 7：启动 frida_agent_main 建连</a>
+          <a href="#s-selinux" class="sub">· 前置准备：修改内核权限白名单</a>
+          <a href="#s-entry" class="sub">· 动作 1：附加并暂停目标进程</a>
+          <a href="#s-remotecall" class="sub">· 动作 2：开辟内存</a>
+          <a href="#s-bootstrap" class="sub">· 动作 3：写入机器码、执行并创建 socketpair</a>
+          <a href="#s-loader" class="sub">· 动作 4：覆盖写入第二段机器码，拉起后台线程</a>
+          <a href="#s-memfd" class="sub">· 动作 5：通过管道把 agent.so 传给后台线程</a>
+          <a href="#s-mapper" class="sub">· 动作 6：后台线程将 agent.so 映射进内存执行</a>
+          <a href="#s-agent" class="sub">· 动作 7：启动 agent.so 入口并建立通信</a>
           <a href="#sequence"><span class="num">04</span>第三部分：完整信号与握手时序</a>
           <a href="#spawn-vs-attach"><span class="num">05</span>Attach (-N) vs Zymbiote Spawn (-f)</a>
           <a href="#artifacts"><span class="num">06</span>原理反推进程痕迹</a>
@@ -1138,102 +1138,102 @@
           <div class="scope-row">
             <span class="badge">Frida Android 系列 · 第二篇</span>
             <span class="badge teal">Frida 17.27.5 · frida-core @ 075600d9</span>
-            <span class="badge amber">主干动作链 + 逐节点底层细节全展开</span>
+            <span class="badge amber">先讲“每一步要做什么” · 再展开“底层怎么做到的”</span>
           </div>
           <h1><code>frida-server</code> 如何把 <code>frida-agent.so</code> 注入目标 App？</h1>
-          <p class="hero-lead">本文采用<strong>「先看一条线的主干物理动作 → 再逐个节点把底层技术细节彻底剥开」</strong>的讲法：先让你 1 分钟看清从 <code>ptrace</code> 附加进程、修改寄存器调 <code>mmap</code> 开辟内存、写入并执行两段裸机器码（<code>bootstrapper.bin</code> / <code>loader.bin</code>），到最后用 <code>memfd + SCM_RIGHTS</code> 传 <code>frida-agent.so</code> 完成自映射的 **7 个连续动作**；随后围绕这 7 个节点，把每一个“为什么这么做、寄存器怎么变、内存怎么排、内核怎么传”的细节与源码逐行展开。</p>
+          <p class="hero-lead">看复杂的底层源码最怕“一上来就掉进寄存器和系统调用的细节泥潭”。本文严格分成两层来写：<strong>第一部分只讲“要做什么”</strong>（不堆砌任何技术名词，用最直白的大白话把从附加进程、开辟内存、写入并执行机器码、创建 <code>socketpair</code>，到把 <code>frida-agent.so</code> 传过去加载执行的 <strong>7 个动作</strong> 一条线串起来）；<strong>第二部分再讲“怎么做到”</strong>（围绕这 7 个动作，把每一处寄存器改写、内存排布、内核句柄传递与源码逐一展开）。</p>
         </header>
 
         <!-- ==================== 01 OVERALL SPINE ==================== -->
         <section id="overview" class="chapter">
-          <p class="chapter-kicker">01 / Part I · The 7-Action Spine</p>
-          <h2>第一部分：整体主干流程（一条直线看懂 7 个连续物理动作）</h2>
-          <p class="lead">先抛开复杂的源码文件名。假设你是手机上以 root 运行的 <code>frida-server</code>（肚子里静态打包了 <code>bootstrapper.bin</code>、<code>loader.bin</code> 和 <code>frida-agent.so</code> 三样武器），现在要把 <code>frida-agent.so</code> 塞进正在运行的目标 App（比如 <code>pid = 12345</code>）里跑起来，全过程就是下面这 <strong>1 个前置准备 + 7 个连续物理动作</strong>（点击任意卡片可直达第二部分的深度展开）：</p>
+          <p class="chapter-kicker">01 / Part I · What Needs To Be Done</p>
+          <h2>第一部分：整体主干流程（先不看技术细节，只看每一步“要做什么”）</h2>
+          <p class="lead">我们的目标非常纯粹：让正在运行的目标 App 加载并运行 <code>frida-agent.so</code>。为了实现这个目标，<code>frida-server</code> 依次做了下面 <strong>1 个前置准备 + 7 个连续动作</strong>（点击任意一步可直接跳到第二部分看它的底层技术细节）：</p>
 
-          <!-- 7 步主干物理动作流向总图 -->
-          <figure class="selinux-viz" aria-label="Frida 注入 7 个连续物理动作主干流向图">
+          <!-- 7 步主干物理动作流向总图（纯粹描述“要做什么”，零技术黑话堆砌） -->
+          <figure class="selinux-viz" aria-label="Frida 注入 7 个连续动作主干流向图">
             <div class="selinux-viz-head">
-              <strong>🧭 主干动作链：<code>frida-server</code> 注入目标 App 的 7 个连续物理动作（点击卡片直达对应细节展开）</strong>
-              <span class="muted">先看清主干，再进第二部分拆细节</span>
+              <strong>🧭 整体主干流程：从附加进程到跑起 <code>frida-agent.so</code> 的 7 个动作（点击卡片查看该步的技术细节）</strong>
+              <span class="muted">第一层视角：只看“要做什么”</span>
             </div>
             <div class="selinux-viz-body" style="display:grid;gap:10px;">
               <!-- 前置 -->
-              <a href="#s-selinux" style="display:grid;grid-template-columns:130px 1fr auto;align-items:center;gap:14px;padding:11px 16px;border:1px dashed var(--teal);border-left:4px solid var(--teal);border-radius:8px;background:var(--teal-soft);text-decoration:none;">
-                <span style="font:700 12px var(--mono);color:var(--teal);">前置动作 · 破门禁</span>
-                <div style="font-size:13.8px;color:var(--ink);">
-                  <strong>不关 Enforcing 热修改内核 SELinux 白名单</strong>：启动时将 <code>execmem</code>、<code>frida_memfd</code>、<code>fd use</code>、<code>unix_stream_socket</code> 写入内核策略表，防止后续目标 App 执行动作时被内核报 <code>EACCES</code> 拍死。
+              <a href="#s-selinux" style="display:grid;grid-template-columns:145px 1fr auto;align-items:center;gap:14px;padding:11px 16px;border:1px dashed var(--teal);border-left:4px solid var(--teal);border-radius:8px;background:var(--teal-soft);text-decoration:none;">
+                <span style="font:700 12.5px var(--mono);color:var(--teal);">前置准备</span>
+                <div style="font-size:14.2px;color:var(--ink);">
+                  <strong>修改内核权限白名单</strong> —— 给目标 App 放行“开辟可执行内存、使用外部传入的文件句柄、连接 <code>frida-server</code>”的权限。
                 </div>
-                <span style="font:700 12px var(--mono);color:var(--teal);white-space:nowrap;">看细节 ↓</span>
+                <span style="font:700 12px var(--mono);color:var(--teal);white-space:nowrap;">技术细节 ↓</span>
               </a>
 
               <!-- 动作 1 ~ 7 -->
               <div style="display:grid;gap:8px;">
-                <a href="#s-entry" style="display:grid;grid-template-columns:130px 1fr auto;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:8px;background:#fff;text-decoration:none;">
-                  <span style="font:700 12.5px var(--mono);color:var(--blue);">动作 1 · 附加进程</span>
-                  <div style="font-size:14px;color:var(--ink);">
-                    <strong><code>ptrace</code> 附加到目标进程</strong>：用 <code>PTRACE_SEIZE + PTRACE_INTERRUPT</code> 静默暂停目标 App 主线程，并用 <code>PTRACE_GETREGSET</code> 把它当前的 ARM64 寄存器完整拍照备份到 <code>saved_registers</code>。
+                <a href="#s-entry" style="display:grid;grid-template-columns:145px 1fr auto;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:8px;background:#fff;text-decoration:none;">
+                  <span style="font:700 13px var(--mono);color:var(--blue);">动作 1</span>
+                  <div style="font-size:14.5px;color:var(--ink);">
+                    <strong>附加并暂停目标进程</strong> —— 用 <code>ptrace</code> 暂停目标 App 的主线程，并把它当前的运行现场保存起来（以便后面恢复）。
                   </div>
-                  <span style="font:700 12px var(--mono);color:var(--blue);white-space:nowrap;">节点 1 ↓</span>
+                  <span style="font:700 12px var(--mono);color:var(--blue);white-space:nowrap;">技术细节 ↓</span>
                 </a>
 
                 <div style="text-align:center;font:700 13px var(--mono);color:var(--muted);line-height:1;">▼</div>
 
-                <a href="#s-remotecall" style="display:grid;grid-template-columns:130px 1fr auto;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:8px;background:#fff;text-decoration:none;">
-                  <span style="font:700 12.5px var(--mono);color:var(--blue);">动作 2 · 改寄存器辟地</span>
-                  <div style="font-size:14px;color:var(--ink);">
-                    <strong>修改寄存器，执行目标进程的 <code>mmap()</code> 函数开辟一块 RWX 内存</strong>：把 <code>PC</code> 改成目标进程里的 <code>mmap</code> 地址、<code>x0..x5</code> 填好参数、返回地址 <code>LR</code> 设为陷阱地址 <code>0x320</code>；放行跑完撞上 <code>0x320</code> 停下后，从返回值寄存器 <strong><code>x0</code></strong> 读出新开辟的 RWX 内存首地址（<code>allocation_base</code>）。
+                <a href="#s-remotecall" style="display:grid;grid-template-columns:145px 1fr auto;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:8px;background:#fff;text-decoration:none;">
+                  <span style="font:700 13px var(--mono);color:var(--blue);">动作 2</span>
+                  <div style="font-size:14.5px;color:var(--ink);">
+                    <strong>开辟内存</strong> —— 控制目标进程调用它自己的 <code>mmap()</code> 函数，在目标进程里开辟一块可读、可写、可执行的空白内存。
                   </div>
-                  <span style="font:700 12px var(--mono);color:var(--blue);white-space:nowrap;">节点 2 ↓</span>
+                  <span style="font:700 12px var(--mono);color:var(--blue);white-space:nowrap;">技术细节 ↓</span>
                 </a>
 
                 <div style="text-align:center;font:700 13px var(--mono);color:var(--muted);line-height:1;">▼</div>
 
-                <a href="#s-bootstrap" style="display:grid;grid-template-columns:130px 1fr auto;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--amber);border-radius:8px;background:#fff;text-decoration:none;">
-                  <span style="font:700 12.5px var(--mono);color:var(--amber);">动作 3 · 写 .bin 探路</span>
-                  <div style="font-size:14px;color:var(--ink);">
-                    <strong>往这块 RWX 内存写入 <code>frida-server</code> 里的 <code>bootstrapper.bin</code> 并执行机器码</strong>：前半截放裸机器码（<code>PC</code> 指这）、后半截放参数结构体 <code>ctx</code>（<strong><code>x0</code></strong> 指这作为第 1 参数）；机器码跑起来后在目标进程里<strong>搜齐 17 个 libc/linker 函数地址</strong>，并在目标内调 <code>socketpair</code> 建好通信句柄 <code>ctrlfds[0..1]</code>（服务端用 <code>pidfd_getfd</code> 偷走 <code>0</code> 号端，打通跨进程管道）。
+                <a href="#s-bootstrap" style="display:grid;grid-template-columns:145px 1fr auto;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--amber);border-radius:8px;background:#fff;text-decoration:none;">
+                  <span style="font:700 13px var(--mono);color:var(--amber);">动作 3</span>
+                  <div style="font-size:14.5px;color:var(--ink);">
+                    <strong>写入第一段机器码、执行机器码、创建 <code>socketpair</code></strong> —— 把探路机器码写进刚开辟的内存并执行：在目标进程里找齐后面要用的系统函数地址，并创建一对 <code>socketpair</code> 建立与 <code>frida-server</code> 的跨进程通信管道。
                   </div>
-                  <span style="font:700 12px var(--mono);color:var(--amber);white-space:nowrap;">节点 3 ↓</span>
+                  <span style="font:700 12px var(--mono);color:var(--amber);white-space:nowrap;">技术细节 ↓</span>
                 </a>
 
                 <div style="text-align:center;font:700 13px var(--mono);color:var(--muted);line-height:1;">▼</div>
 
-                <a href="#s-loader" style="display:grid;grid-template-columns:130px 1fr auto;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--amber);border-radius:8px;background:#fff;text-decoration:none;">
-                  <span style="font:700 12.5px var(--mono);color:var(--amber);">动作 4 · 覆盖写 .bin</span>
-                  <div style="font-size:14px;color:var(--ink);">
-                    <strong>原地覆盖写入第二段机器码 <code>loader.bin</code> 并执行，拉起后台线程后秒退主线程</strong>：复用同一块 RWX 内存覆盖写入 <code>loader.bin</code> 和 <code>FridaLoaderContext</code>；主线程只执行 <strong>1 行 <code>pthread_create(frida_main)</code></strong> 拉起后台线程便返回 <code>0x320</code>，<code>frida-server</code> <strong>立即写回备份寄存器并 <code>PTRACE_DETACH</code></strong>，让 App 主线程恢复正常运行！
+                <a href="#s-loader" style="display:grid;grid-template-columns:145px 1fr auto;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--amber);border-radius:8px;background:#fff;text-decoration:none;">
+                  <span style="font:700 13px var(--mono);color:var(--amber);">动作 4</span>
+                  <div style="font-size:14.5px;color:var(--ink);">
+                    <strong>覆盖写入第二段机器码并执行（拉起后台线程 + 放行主线程）</strong> —— 把接应机器码写进同一块内存并执行：在目标进程里创建一个专门干活的后台线程，随即把主线程恢复原状并脱离 <code>ptrace</code>。
                   </div>
-                  <span style="font:700 12px var(--mono);color:var(--amber);white-space:nowrap;">节点 4 ↓</span>
+                  <span style="font:700 12px var(--mono);color:var(--amber);white-space:nowrap;">技术细节 ↓</span>
                 </a>
 
                 <div style="text-align:center;font:700 13px var(--mono);color:var(--muted);line-height:1;">▼</div>
 
-                <a href="#s-memfd" style="display:grid;grid-template-columns:130px 1fr auto;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--teal);border-radius:8px;background:#fff;text-decoration:none;">
-                  <span style="font:700 12.5px var(--mono);color:var(--teal);">动作 5 · memfd 传 SO</span>
-                  <div style="font-size:14px;color:var(--ink);">
-                    <strong>把 <code>frida-agent.so</code> 装进纯内存文件 <code>memfd</code>，经管道隔空传给目标后台线程</strong>：不往磁盘写文件，而是在内核 RAM 建匿名虚拟文件 <code>memfd</code> 装好 <code>agent.so</code>，通过动作 3 打通的 <code>socketpair</code> 管道用 <strong><code>sendmsg / recvmsg (SCM_RIGHTS)</code></strong> 让内核把该文件句柄直接复制给目标 App 的后台线程。
+                <a href="#s-memfd" style="display:grid;grid-template-columns:145px 1fr auto;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--teal);border-radius:8px;background:#fff;text-decoration:none;">
+                  <span style="font:700 13px var(--mono);color:var(--teal);">动作 5</span>
+                  <div style="font-size:14.5px;color:var(--ink);">
+                    <strong>通过管道把 <code>frida-agent.so</code> 传给目标后台线程</strong> —— <code>frida-server</code> 把肚子里的 <code>frida-agent.so</code> 放进内存文件，通过动作 3 建好的管道直接把文件句柄传给目标进程的后台线程。
                   </div>
-                  <span style="font:700 12px var(--mono);color:var(--teal);white-space:nowrap;">节点 5 ↓</span>
+                  <span style="font:700 12px var(--mono);color:var(--teal);white-space:nowrap;">技术细节 ↓</span>
                 </a>
 
                 <div style="text-align:center;font:700 13px var(--mono);color:var(--muted);line-height:1;">▼</div>
 
-                <a href="#s-mapper" style="display:grid;grid-template-columns:130px 1fr auto;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--teal);border-radius:8px;background:#fff;text-decoration:none;">
-                  <span style="font:700 12.5px var(--mono);color:var(--teal);">动作 6 · 映射执行 SO</span>
-                  <div style="font-size:14px;color:var(--ink);">
-                    <strong>目标后台线程把 <code>memfd</code> 里的 <code>frida-agent.so</code> 映射进内存并执行初始化</strong>：Frida 17 默认开启 <code>HAVE_MAPPER</code> 自映射——后台线程先 <code>mmap</code> 保留地址回报给服务端算好重定位，再执行 4 条原语把 <code>memfd</code> 各段映射到位、刷 ARM64 指令缓存并直调 ELF 构造函数（<strong>彻底绕过系统 <code>dlopen</code>，零 <code>soinfo</code> 登记</strong>）。
+                <a href="#s-mapper" style="display:grid;grid-template-columns:145px 1fr auto;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--teal);border-radius:8px;background:#fff;text-decoration:none;">
+                  <span style="font:700 13px var(--mono);color:var(--teal);">动作 6</span>
+                  <div style="font-size:14.5px;color:var(--ink);">
+                    <strong>后台线程将 <code>frida-agent.so</code> 映射进内存并执行初始化</strong> —— 目标后台线程收到文件句柄后，把 <code>frida-agent.so</code> 的代码段和数据段映射进目标进程内存，并执行它的初始化构造函数。
                   </div>
-                  <span style="font:700 12px var(--mono);color:var(--teal);white-space:nowrap;">节点 6 ↓</span>
+                  <span style="font:700 12px var(--mono);color:var(--teal);white-space:nowrap;">技术细节 ↓</span>
                 </a>
 
                 <div style="text-align:center;font:700 13px var(--mono);color:var(--muted);line-height:1;">▼</div>
 
-                <a href="#s-agent" style="display:grid;grid-template-columns:130px 1fr auto;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--teal);border-radius:8px;background:#fff;text-decoration:none;">
-                  <span style="font:700 12.5px var(--mono);color:var(--teal);">动作 7 · 启动 Agent</span>
-                  <div style="font-size:14px;color:var(--ink);">
-                    <strong>传入第二枚通信句柄 <code>agent_ctrlfd</code>，跳进 <code>frida_agent_main()</code> 建立 P2P D-Bus</strong>：将自映射内存区登记进 <code>Gum.Cloak</code> 隐身斗篷，把 <code>agent_ctrlfd</code> 升级为 P2P D-Bus 会话并启动 <code>gum-js-loop</code> 线程——注入大功告成！
+                <a href="#s-agent" style="display:grid;grid-template-columns:145px 1fr auto;align-items:center;gap:14px;padding:12px 16px;border:1px solid var(--line);border-left:4px solid var(--teal);border-radius:8px;background:#fff;text-decoration:none;">
+                  <span style="font:700 13px var(--mono);color:var(--teal);">动作 7</span>
+                  <div style="font-size:14.5px;color:var(--ink);">
+                    <strong>启动 <code>frida-agent.so</code> 主入口函数，建立长期通信连接</strong> —— 后台线程调用 <code>frida-agent.so</code> 的入口函数 <code>frida_agent_main()</code>，与 <code>frida-server</code> 建立正式的控制连接，等待接收并执行用户的 Hook 脚本。
                   </div>
-                  <span style="font:700 12px var(--mono);color:var(--teal);white-space:nowrap;">节点 7 ↓</span>
+                  <span style="font:700 12px var(--mono);color:var(--teal);white-space:nowrap;">技术细节 ↓</span>
                 </a>
               </div>
             </div>
@@ -1241,20 +1241,20 @@
 
           <div class="compare-pair">
             <article class="compare-box">
-              <h4>🤔 为什么不直接在动作 2 改寄存器调用 <code>dlopen("/data/local/tmp/agent.so")</code>，非要绕上面 7 步？</h4>
+              <h4>🤔 为什么要分这么几步走？不能在动作 2 直接让目标进程加载 <code>frida-agent.so</code> 吗？</h4>
               <ul>
-                <li><strong>死结 ①（先有鸡还是先有蛋）</strong>：你想调 <code>dlopen</code> 加载 <code>.so</code>，但在 Android 7+ 上它叫 <code>__loader_dlopen</code> 且藏在 <code>linker64</code> 里——不先跑一段探路机器码（动作 3 <code>bootstrapper.bin</code>），你连它在目标进程哪个地址都不知道！</li>
-                <li><strong>死结 ②（主线程锁死锁与 ANR）</strong>：被 <code>ptrace</code> 强行暂停的主线程可能正持有 <code>malloc</code> 或 <code>linker</code> 全局锁，如果直接在主线程里跑耗时的加载逻辑，当场就会死锁卡死 App（所以必须有动作 4 <code>loader.bin</code> 拉起独立后台线程并秒放主线程）。</li>
-                <li><strong>死结 ③（磁盘扫盘与 Linker 留痕）</strong>：往 <code>/data/local/tmp</code> 放 <code>.so</code> 再调系统 <code>dlopen</code>，既在磁盘留文件，又会被写进 Android linker 的 <code>soinfo</code> 链表（所以才有动作 5 的 <code>memfd + SCM_RIGHTS</code> 零落盘传句柄，以及动作 6 的 <code>HAVE_MAPPER</code> 自映射绕过 <code>dlopen</code>）。</li>
+                <li><strong>原因 1（先得找函数地址）</strong>：要想在目标进程里加载 <code>.so</code> 或建线程，必须调用目标进程里的系统函数（如 <code>dlopen</code>、<code>pthread_create</code>），但我们一开始并不知道它们在目标进程内存的什么位置——所以必须先有<strong>动作 2（开辟内存）</strong>和<strong>动作 3（写一段探路机器码进去把函数地址找出来）</strong>。</li>
+                <li><strong>原因 2（不能一直卡住主线程）</strong>：加载 20MB 的 <code>frida-agent.so</code> 很耗时，而且被暂停的主线程可能正拿着系统锁；如果在主线程里硬加载，App 很容易卡死——所以必须有<strong>动作 4（拉起一个独立的后台线程来干重活，先把主线程放行）</strong>。</li>
+                <li><strong>原因 3（不落盘传递 `.so`）</strong>：后台线程跑起来后，为了让它在不读写手机磁盘的前提下拿到 <code>frida-agent.so</code>，才需要借用动作 3 建好的 <code>socketpair</code> 管道，在<strong>动作 5 ~ 7</strong> 里把 `.so` 从内存传过去并映射启动。</li>
               </ul>
             </article>
 
             <article class="compare-box real">
-              <h4>💡 两段 <code>.bin</code> 与一个 <code>.so</code> 的兵种分工（全部静态内嵌在 <code>frida-server</code> 肚子里）</h4>
+              <h4>📦 <code>frida-server</code> 肚子里自带的三样“载荷”分别在哪一步登场？</h4>
               <ul>
-                <li><strong>探路工兵 <code>bootstrapper-arm64.bin</code>（动作 3）</strong>：几 KB 的纯裸机器码（无 ELF 头、不依赖 libc）。只负责进去搜齐 17 个函数地址 + 建好一条跨进程 <code>socketpair</code> 管道。</li>
-                <li><strong>接应工兵 <code>loader-arm64.bin</code>（动作 4 ~ 6）</strong>：同样是几 KB 的纯裸机器码，原地覆盖 <code>bootstrapper.bin</code> 的内存。负责拉起后台线程、释放主线程、通过管道收下 <code>memfd</code> 并把真正的 <code>frida-agent.so</code> 映射进内存。</li>
-                <li><strong>主力部队 <code>frida-agent-64.so</code>（动作 5 ~ 7）</strong>：约 20MB 的完整动态库（内含 Gum 引擎、QuickJS/V8、Java/ObjC Bridge 與 GDBus）。通过 <code>memfd</code> 零落盘运入，由 <code>loader.bin</code> 自映射点亮。</li>
+                <li><strong>第一段机器码 <code>bootstrapper.bin</code>（在动作 3 写入执行）</strong>：极小的纯机器码，负责在目标进程里搜寻函数地址、创建 <code>socketpair</code> 通信管道。</li>
+                <li><strong>第二段机器码 <code>loader.bin</code>（在动作 4 写入执行）</strong>：同样是极小的纯机器码，负责在目标进程里创建后台线程，并指挥后台线程完成动作 5 ~ 7（接收、映射并启动 <code>frida-agent.so</code>）。</li>
+                <li><strong>核心动态库 <code>frida-agent.so</code>（在动作 5 传给目标进程，动作 6 ~ 7 启动）</strong>：真正的 Hook 引擎与 JS 运行时所在的主体库。</li>
               </ul>
             </article>
           </div>
@@ -1338,13 +1338,14 @@
 
         <!-- ==================== 03 STEP-BY-STEP TECHNICAL EXPANSION ==================== -->
         <section id="source-deep" class="chapter">
-          <p class="chapter-kicker">03 / Part II · Deep Dive into Every Action Node</p>
-          <h2>第二部分：顺着主干的 7 个动作节点，逐点展开技术细节与源码</h2>
-          <p class="lead">看清了第一部分的 7 步主干动作后，现在我们沿着<strong>「节点 0（前置破障）➔ 动作 1 ➔ 动作 2 ➔ 动作 3 ➔ 动作 4 ➔ 动作 5 ➔ 动作 6 ➔ 动作 7」</strong>逐站停靠，把每一站背后的底层原理、寄存器与内存细节、以及 <code>frida-core @ 075600d9</code> 源码彻底剥开。</p>
+          <p class="chapter-kicker">03 / Part II · How Each Action Works Under The Hood</p>
+          <h2>第二部分：围绕上述 7 个动作，逐点展开底层技术细节与源码</h2>
+          <p class="lead">第一部分我们已经知道了每一步<strong>“要做什么”</strong>；现在我们进入第二层视角，顺着这 7 个动作逐站停靠，把每一站<strong>“底层是怎么做到的（技术细节 + 源码行号）”</strong>彻底剥开。</p>
 
           <!-- ==================== NODE 0: SELinux ==================== -->
-          <h3 id="s-selinux">📍 节点 0（前置动作）：不关 Enforcing 热修改 SELinux，打通 4 道内核门禁</h3>
-          <p>在 <code>frida-server</code> 启动并准备对任何 App 执行动作 1~7 之前，它必须先调用一次 <code>frida_selinux_patch_policy()</code>（<code>lib/selinux/patch.c</code>）。为什么？因为哪怕 <code>frida-server</code> 自身是 root（<code>UID=0</code>），<strong>后面动作 2~7 里真正执行 <code>mmap(RWX)</code> 开辟可执行内存、接收跨进程 FD、把 <code>memfd</code> 映射为代码段的主体，全都是目标 App 自己（SELinux 身份标签是低权限的 <code>untrusted_app</code>）</strong>！如果不先给内核 SELinux 白名单打补丁，目标 App 在后面会连续撞上 4 道门禁并直接报 <code>EACCES</code> 失败：</p>
+          <h3 id="s-selinux">📍 前置准备：修改内核权限白名单</h3>
+          <p><strong>【这一步要做什么】</strong>：在开始注入前，先在内核权限名单里给目标 App 放行“开辟可执行内存、使用外部传入的文件句柄、连接 <code>frida-server</code>”的权限。<br>
+          <strong>【底层怎么实现】</strong>：<code>frida-server</code> 启动时调用 <code>frida_selinux_patch_policy()</code>（<code>lib/selinux/patch.c</code>），在不关闭 SELinux <code>Enforcing</code> 的前提下把下面 4 道内核门禁打开（否则目标 App 属于低权限的 <code>untrusted_app</code>，执行后续动作会被内核直接报 <code>EACCES</code> 拒绝）：</p>
 
           <figure class="selinux-viz" aria-label="SELinux 4 道门禁打补丁前后对比图">
             <div class="selinux-viz-head">
@@ -1414,8 +1415,9 @@
           </div>
 
           <!-- ==================== ACTION 1: PTRACE ==================== -->
-          <h3 id="s-entry">📍 动作 1：<code>ptrace</code> 附加到目标进程，静默冻结线程并备份寄存器现场</h3>
-          <p>当电脑端下发 <code>attach(pid)</code> 后，<code>frida-server</code> 从总入口 <code>LinuxHostSession.perform_attach_to()</code> 转入底层注入器 <code>SeizeSession</code>（<code>src/linux/frida-helper-backend.vala:2011</code>），执行第一个实质性物理动作：<strong>用 <code>ptrace</code> 接管并冻住目标 App 的主线程，同时把它的 CPU 寄存器现场完整拍照存档</strong>。</p>
+          <h3 id="s-entry">📍 动作 1：附加并暂停目标进程</h3>
+          <p><strong>【这一步要做什么】</strong>：暂停目标 App 的主线程，并把它当前的运行现场保存起来（以便后面恢复）。<br>
+          <strong>【底层怎么实现】</strong>：<code>frida-server</code> 从总入口 <code>LinuxHostSession.perform_attach_to()</code> 转入 <code>SeizeSession</code>（<code>src/linux/frida-helper-backend.vala:2011</code>），用 <code>ptrace</code> 冻住目标线程并备份 ARM64 CPU 寄存器，里面包含两个关键技术细节：</p>
 
           <figure class="selinux-viz" aria-label="动作 1 ptrace 静默冻结与寄存器备份细节展开">
             <div class="selinux-viz-head">
@@ -1467,8 +1469,9 @@
           </figure>
 
           <!-- ==================== ACTION 2: REMOTECALL & MMAP ==================== -->
-          <h3 id="s-remotecall">📍 动作 2：修改寄存器，借壳执行目标进程的 <code>mmap()</code> 函数开辟一块 RWX 内存</h3>
-          <p>现在目标线程已经被冻住了，我们想往目标进程里写代码，但<strong>写代码之前得先在目标进程自己的虚拟地址空间里申请一块既可读、又可写、还可执行的空地（RWX 内存）</strong>。跨进程怎么调目标 App 里的 <code>mmap()</code> 函数？Frida 用了一套极其精妙的 <strong><code>RemoteCall</code>（改寄存器借壳执行 + 假返回地址 <code>0x320</code> 闹钟）</strong>：</p>
+          <h3 id="s-remotecall">📍 动作 2：开辟内存</h3>
+          <p><strong>【这一步要做什么】</strong>：在目标进程自己的地址空间里，开辟一块可读、可写、可执行（RWX）的空白内存区，用来放后面要写入的机器码。<br>
+          <strong>【底层怎么实现】</strong>：跨进程没法直接帮别人申请内存，必须逼目标进程自己调用 <code>mmap()</code>。Frida 通过 <strong><code>RemoteCall</code>（篡改目标线程的 ARM64 寄存器 + 把返回地址 <code>LR</code> 设为非法地址 <code>0x320</code> 触发段错误闹钟 + 从返回值寄存器 <code>x0</code> 读出新内存地址）</strong> 来实现：</p>
 
           <figure class="selinux-viz" aria-label="ARM64 RemoteCall 借壳执行四步寄存器变化图">
             <div class="selinux-viz-head">
@@ -1565,9 +1568,9 @@
           </figure>
 
           <!-- ==================== ACTION 3: BOOTSTRAPPER.BIN ==================== -->
-          <h3 id="s-bootstrap">📍 动作 3：往新内存写入 <code>frida-server</code> 里的 <code>bootstrapper.bin</code> 并执行机器码</h3>
-          <p>拿到了目标进程里的 RWX 内存地址 <code>allocation_base</code>（假设是 <code>0x7f8a000000</code>），接下来做第 3 个动作：<strong>把打包在 <code>frida-server</code> 肚子里的第一段裸机器码 <code>bootstrapper-arm64.bin</code> 加上它的参数结构体 <code>FridaBootstrapContext</code> 写进这块内存，并再次修改寄存器让目标线程去执行它！</strong></p>
-          <p>围绕这个动作，有 <strong>4 个最关键的技术细节</strong> 必须彻底拆开：</p>
+          <h3 id="s-bootstrap">📍 动作 3：写入第一段机器码、执行机器码、创建 <code>socketpair</code></h3>
+          <p><strong>【这一步要做什么】</strong>：往动作 2 刚开辟出来的内存里写入第一段探路机器码并执行，让它在目标进程内部找齐后面要用到的系统函数地址，并创建一对 <code>socketpair</code> 建立与 <code>frida-server</code> 的跨进程通信管道。<br>
+          <strong>【底层怎么实现】</strong>：写入的是打包在 <code>frida-server</code> 里的裸机器码 <code>bootstrapper-arm64.bin</code> 与参数结构体 <code>FridaBootstrapContext</code>。围绕“怎么写进去、怎么传参、怎么跑起来、怎么把 `socketpair` 一端交给服务端”，展开以下 <strong>4 个核心技术细节</strong>：</p>
 
           <figure class="selinux-viz" aria-label="动作 3 bootstrapper.bin 四个核心技术细节全展开">
             <div class="selinux-viz-head">
@@ -1655,8 +1658,9 @@
           </figure>
 
           <!-- ==================== ACTION 4: LOADER.BIN ==================== -->
-          <h3 id="s-loader">📍 动作 4：原地覆盖写入 <code>loader.bin</code> 并执行机器码，拉起后台线程后秒速脱离主线程</h3>
-          <p>动作 3 的探路先锋 <code>bootstrapper.bin</code> 已经把 17 个函数地址和 <code>socketpair</code> 管道全部备齐了。接下来进入动作 4（<code>InjectSession.inject()</code>，<code>frida-helper-backend.vala:915</code>）：<strong>为了不浪费内存，<code>frida-server</code> 直接原地覆盖复用刚才那块 <code>0x7f8a000000</code> RWX 内存，把前半截换成第二段裸机器码 <code>loader-arm64.bin</code>，把后半截换成 <code>FridaLoaderContext</code>，然后发起最后一次 <code>RemoteCall</code> 执行 <code>frida_load(ctx)</code>！</strong></p>
+          <h3 id="s-loader">📍 动作 4：覆盖写入第二段机器码并执行（拉起后台线程 + 放行主线程）</h3>
+          <p><strong>【这一步要做什么】</strong>：用第二段接应机器码覆盖刚才那块内存并执行，在目标进程里拉起一个专门干活的后台线程，然后立刻把目标进程的主线程恢复原状并放行。<br>
+          <strong>【底层怎么实现】</strong>：<code>frida-server</code> 原地复用动作 2 开辟的 <code>0x7f8a000000</code> 内存，把前半截覆盖写成 <code>loader-arm64.bin</code>、后半截覆盖写成 <code>FridaLoaderContext</code>，再次调 <code>RemoteCall</code> 执行入口函数 <code>frida_load(ctx)</code>：</p>
 
           <figure class="selinux-viz" aria-label="动作 4 loader.bin 原地覆盖复用内存与秒退主线程图解">
             <div class="selinux-viz-head">
@@ -1723,9 +1727,9 @@
           </figure>
 
           <!-- ==================== ACTION 5: MEMFD & SCM_RIGHTS ==================== -->
-          <h3 id="s-memfd">📍 动作 5：把 <code>frida-agent.so</code> 装进内存文件 <code>memfd</code>，通过管道隔空传给目标后台线程</h3>
-          <p>你看，直到这一步，目标 App 内部终于有了我们的后台接应线程 <code>frida_main</code>，而且它和 <code>frida-server</code> 之间已经通了 <code>ctrlfds</code> 匿名 Socket 管道！这时候，<strong>才轮到运送真正的主力部队——约 20MB 的 <code>frida-agent-64.so</code></strong>。</p>
-          <p><code>frida-agent-64.so</code> 原本作为二进制资源内嵌在 <code>frida-server</code> 自身的数据段里。怎么把它交给目标 App 的后台线程加载？这里就引出了两个核心技术细节：<strong><code>memfd</code>（纯内存匿名文件）</strong>与 <strong><code>SCM_RIGHTS</code>（内核级跨进程文件描述符传递）</strong>：</p>
+          <h3 id="s-memfd">📍 动作 5：通过管道把 <code>frida-agent.so</code> 传给目标后台线程</h3>
+          <p><strong>【这一步要做什么】</strong>：在不往手机磁盘写任何文件的前提下，把 <code>frida-server</code> 肚子里的 <code>frida-agent.so</code> 通过动作 3 建好的管道传给动作 4 刚拉起的目标后台线程。<br>
+          <strong>【底层怎么实现】</strong>：这里用到了 Linux 内核的两项机制——先用 <strong><code>memfd_create</code>（纯内存匿名文件）</strong> 把 <code>.so</code> 装进内存拿到文件描述符 <code>fd</code>，再通过 <code>socketpair</code> 管道用 <strong><code>sendmsg / recvmsg + SCM_RIGHTS</code>（内核级跨进程文件描述符传递）</strong> 把句柄递进目标后台线程：</p>
 
           <figure class="selinux-viz" aria-label="动作 5 memfd 纯内存文件与 SCM_RIGHTS 跨进程传句柄原理图">
             <div class="selinux-viz-head">
@@ -1796,8 +1800,9 @@
           </figure>
 
           <!-- ==================== ACTION 6: MAPPER VS DLOPEN ==================== -->
-          <h3 id="s-mapper">📍 动作 6：目标后台线程把 <code>memfd</code> 里的 <code>frida-agent.so</code> 映射进内存并执行（Frida 17 自映射 vs 传统 <code>dlopen</code>）</h3>
-          <p>后台线程 <code>frida_main</code> 拿到了 <code>frida-agent.so</code> 的内存文件句柄 <code>codefd</code> 后，怎么把它变成进程里可执行的机器码？在 <strong>Frida 17.27.5</strong> 中，这里有<strong>默认自映射路径（<code>HAVE_MAPPER = 1</code>）</strong>与<strong>传统回退路径（<code>dlopen</code>）</strong>两条分支，我们把两者的技术细节全部展开：</p>
+          <h3 id="s-mapper">📍 动作 6：后台线程将 <code>frida-agent.so</code> 映射进内存并执行初始化</h3>
+          <p><strong>【这一步要做什么】</strong>：目标后台线程拿到 <code>frida-agent.so</code> 的文件句柄后，把它的代码段与数据段装载进目标进程内存，完成重定位并执行它的初始化构造函数。<br>
+          <strong>【底层怎么实现】</strong>：在 <strong>Frida 17.27.5</strong> 中，默认采用<strong>路径 A（<code>HAVE_MAPPER = 1</code> 自映射加载器 <code>frida_map_agent</code>，彻底绕过系统 <code>dlopen</code>）</strong>，同时也保留了<strong>路径 B（传统 <code>dlopen("/proc/%d/fd/%d")</code> 回退路径）</strong>。两者的技术细节如下：</p>
 
           <figure class="selinux-viz" aria-label="动作 6 Frida 17 默认自映射 frida_map_agent 四步曲与传统 dlopen 回退对比">
             <div class="selinux-viz-head">
@@ -1900,8 +1905,9 @@
           </figure>
 
           <!-- ==================== ACTION 7: AGENT_MAIN & DBUS ==================== -->
-          <h3 id="s-agent">📍 动作 7：传入第二枚通信句柄 <code>agent_ctrlfd</code>，启动 <code>frida_agent_main()</code> 建立 P2P D-Bus</h3>
-          <p>现在 <code>frida-agent.so</code> 已经在目标进程内存里准备就绪，只差最后一步点火启动！在 <code>loader.c</code> 的末尾（第 153–168 行），后台线程通过 <code>SCM_RIGHTS</code> 接收了第二枚 Socket 句柄 <strong><code>agent_ctrlfd</code></strong>，完成 <code>READY ↔ ACK</code> 握手后关闭施工管道 <code>ctrlfd</code>，正式调用 <code>ctx-&gt;agent_entrypoint_impl()</code> 进入 <code>frida-agent.so</code> 的主入口 <strong><code>frida_agent_main()</code></strong>（<code>lib/agent/agent.vala</code>）：</p>
+          <h3 id="s-agent">📍 动作 7：启动 <code>frida-agent.so</code> 主入口函数，建立长期通信连接</h3>
+          <p><strong>【这一步要做什么】</strong>：后台线程调用 <code>frida-agent.so</code> 的主入口函数 <code>frida_agent_main()</code>，与 <code>frida-server</code> 建立正式的控制连接，并启动 JS 引擎等待执行 Hook 脚本。<br>
+          <strong>【底层怎么实现】</strong>：<code>frida-server</code> 通过第二次 <code>SCM_RIGHTS</code> 传入一条专用的新 Socket 句柄 <strong><code>agent_ctrlfd</code></strong>，关闭临时施工管道 <code>ctrlfd</code>，随后在 <code>Runner.create_and_run()</code>（<code>lib/agent/agent.vala</code>）中完成隐身登记、P2P D-Bus 建连与 JS 线程预热：</p>
 
           <figure class="selinux-viz" aria-label="动作 7 两对 Socket 分工与 frida_agent_main 三步初始化图解">
             <div class="selinux-viz-head">
