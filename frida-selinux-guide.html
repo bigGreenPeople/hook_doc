@@ -1,0 +1,1885 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>补充专题：Frida 如何在不关 Enforcing 的情况下热修改内核 SELinux 策略？</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  :root {
+    --bg: #faf7f2;
+    --bg-warm: #f4efe6;
+    --surface: #ffffff;
+    --surface-2: #f8f5ef;
+    --border: #e4ddd0;
+    --border-strong: #cfc5b3;
+    --ink: #1e1b18;
+    --ink-2: #4a453e;
+    --ink-3: #7c7468;
+    --accent: #b83a1b;
+    --accent-soft: #faeae5;
+    --blue: #1d4e89;
+    --blue-soft: #e8f0fa;
+    --green: #1b6b45;
+    --green-soft: #e6f4ec;
+    --purple: #5b3285;
+    --purple-soft: #f0e9f8;
+    --amber: #a35c0f;
+    --amber-soft: #fdf3e3;
+    --teal: #0f6b6e;
+    --teal-soft: #e4f5f5;
+    --code-bg: #1e1e24;
+    --code-ink: #e8e6df;
+    --shadow: 0 2px 10px rgba(30, 27, 24, 0.05);
+    --shadow-lg: 0 10px 28px rgba(30, 27, 24, 0.09);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 15.5px;
+    line-height: 1.78;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Layout */
+  .layout {
+    display: grid;
+    grid-template-columns: 284px 1fr;
+    max-width: 1460px;
+    margin: 0 auto;
+    min-height: 100vh;
+  }
+
+  /* Sidebar */
+  aside.sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    background: var(--bg-warm);
+    border-right: 1px solid var(--border);
+    padding: 26px 20px 36px;
+  }
+  .brand {
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  .brand-tag {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+  }
+  .brand h1 {
+    font-family: 'Noto Serif SC', serif;
+    font-size: 16.5px;
+    line-height: 1.38;
+    color: var(--ink);
+  }
+  .brand p {
+    font-size: 12px;
+    color: var(--ink-3);
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+  .back-link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--blue);
+    text-decoration: none;
+    background: var(--blue-soft);
+    padding: 7px 11px;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    transition: all 0.15s;
+  }
+  .back-link:hover {
+    background: #d9e8fa;
+  }
+  .toc-group { margin-bottom: 16px; margin-top: 12px; }
+  .toc-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-3);
+    margin-bottom: 6px;
+    padding-left: 8px;
+  }
+  .toc-list { list-style: none; }
+  .toc-list a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    color: var(--ink-2);
+    text-decoration: none;
+    font-size: 13px;
+    line-height: 1.4;
+    transition: all 0.15s ease;
+  }
+  .toc-list a:hover {
+    background: rgba(184, 58, 27, 0.08);
+    color: var(--accent);
+  }
+  .toc-list a.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .toc-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    min-width: 24px;
+  }
+
+  /* Main content */
+  main.content {
+    padding: 48px 60px 96px;
+    max-width: 1120px;
+  }
+
+  /* Hero */
+  header.hero {
+    padding-bottom: 34px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 44px;
+  }
+  .hero-kicker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--ink-2);
+  }
+  .pill.accent { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .pill.blue { border-color: var(--blue); color: var(--blue); background: var(--blue-soft); }
+  .pill.green { border-color: var(--green); color: var(--green); background: var(--green-soft); }
+  .pill.purple { border-color: var(--purple); color: var(--purple); background: var(--purple-soft); }
+
+  header.hero h1 {
+    font-family: 'Noto Serif SC', serif;
+    font-size: 32px;
+    line-height: 1.28;
+    color: var(--ink);
+    margin-bottom: 14px;
+    letter-spacing: -0.01em;
+  }
+  header.hero .subtitle {
+    font-size: 16.5px;
+    color: var(--ink-2);
+    max-width: 920px;
+    line-height: 1.72;
+  }
+
+  .verdict-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-top: 26px;
+  }
+  .verdict-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 15px 16px;
+    box-shadow: var(--shadow);
+  }
+  .verdict-card.blue { border-top-color: var(--blue); }
+  .verdict-card.green { border-top-color: var(--green); }
+  .verdict-card.purple { border-top-color: var(--purple); }
+  .verdict-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-3);
+    margin-bottom: 5px;
+  }
+  .verdict-title {
+    font-weight: 700;
+    font-size: 14.5px;
+    color: var(--ink);
+    margin-bottom: 6px;
+  }
+  .verdict-desc {
+    font-size: 12.8px;
+    color: var(--ink-2);
+    line-height: 1.55;
+  }
+
+  /* Section Styling */
+  section.chapter {
+    margin-bottom: 64px;
+    scroll-margin-top: 24px;
+  }
+  .chapter-header {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-strong);
+    margin-bottom: 22px;
+  }
+  .chapter-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--surface);
+    background: var(--ink);
+    padding: 3px 10px;
+    border-radius: 4px;
+  }
+  .chapter-header h2 {
+    font-family: 'Noto Serif SC', serif;
+    font-size: 24px;
+    color: var(--ink);
+  }
+  h3.sub-header {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--ink);
+    margin: 28px 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    scroll-margin-top: 24px;
+  }
+  h3.sub-header::before {
+    content: "";
+    display: inline-block;
+    width: 5px;
+    height: 18px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+  p { margin-bottom: 14px; color: var(--ink-2); }
+  p strong { color: var(--ink); }
+
+  /* Inline code */
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.88em;
+    background: var(--bg-warm);
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    border-radius: 4px;
+    color: var(--accent);
+  }
+
+  /* Callouts */
+  .callout {
+    border-left: 4px solid var(--accent);
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    border-radius: 0 8px 8px 0;
+    padding: 16px 20px;
+    margin: 18px 0;
+    box-shadow: var(--shadow);
+  }
+  .callout.blue { border-left-color: var(--blue); }
+  .callout.green { border-left-color: var(--green); }
+  .callout.amber { border-left-color: var(--amber); background: var(--amber-soft); }
+  .callout.purple { border-left-color: var(--purple); }
+  .callout-title {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--ink);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+
+  /* Plain-language visual board */
+  .plain-board {
+    background: linear-gradient(180deg, #fffdf9 0%, #f7f2e7 100%);
+    border: 2px solid var(--border-strong);
+    border-radius: 12px;
+    padding: 22px 24px;
+    margin: 22px 0;
+    box-shadow: var(--shadow);
+  }
+  .plain-board-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding-bottom: 12px;
+    border-bottom: 1px dashed var(--border-strong);
+    margin-bottom: 16px;
+  }
+  .plain-board-title {
+    font-family: 'Noto Serif SC', serif;
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .plain-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--amber-soft);
+    color: var(--amber);
+    border: 1px solid #e6c687;
+  }
+  .plain-vs-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 12px;
+  }
+  .plain-vs-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .plain-vs-card.bad { border-top: 4px solid var(--accent); }
+  .plain-vs-card.good { border-top: 4px solid var(--green); }
+  .plain-vs-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .plain-vs-name {
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--ink);
+  }
+  .plain-vs-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .plain-vs-tag.bad { background: var(--accent-soft); color: var(--accent); }
+  .plain-vs-tag.good { background: var(--green-soft); color: var(--green); }
+
+  /* Rule anatomy visual */
+  .rule-anatomy {
+    background: var(--code-bg);
+    color: var(--code-ink);
+    border-radius: 10px;
+    padding: 20px 22px;
+    margin: 18px 0;
+    box-shadow: var(--shadow);
+  }
+  .rule-tokens {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .rule-token {
+    flex: 1;
+    min-width: 150px;
+    background: #272730;
+    border: 1px solid #3c3c4a;
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .rule-token-code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .rule-token-role {
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+  .rule-token-desc {
+    font-size: 12px;
+    color: #b8b5ad;
+    line-height: 1.5;
+  }
+
+  /* Code Blocks */
+  .code-panel {
+    background: var(--code-bg);
+    color: var(--code-ink);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 18px 0 22px;
+    box-shadow: var(--shadow-lg);
+    border: 1px solid #2e2e38;
+  }
+  .code-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: #16161b;
+    border-bottom: 1px solid #2d2d37;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+  }
+  .code-file {
+    color: #a9b1d6;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .code-file::before {
+    content: "●";
+    color: #e06c75;
+    font-size: 10px;
+  }
+  .code-meta {
+    color: #787c99;
+    font-size: 11px;
+  }
+  pre.code-body {
+    padding: 16px 20px;
+    overflow-x: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.8px;
+    line-height: 1.68;
+  }
+  .kw { color: #c678dd; }
+  .fn { color: #61afef; }
+  .st { color: #98c379; }
+  .cm { color: #6c738a; font-style: italic; }
+  .ty { color: #e5c07b; }
+  .nu { color: #d19a66; }
+  .hl-line {
+    display: block;
+    background: rgba(229, 192, 123, 0.12);
+    border-left: 3px solid #e5c07b;
+    margin: 0 -20px;
+    padding: 0 17px;
+  }
+
+  /* Interactive Simulator */
+  .sim-box {
+    background: var(--surface);
+    border: 2px solid var(--ink);
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 24px 0 32px;
+    box-shadow: var(--shadow-lg);
+  }
+  .sim-header {
+    background: var(--ink);
+    color: var(--surface);
+    padding: 14px 22px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .sim-header h4 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .sim-controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .sim-btn {
+    font-family: 'Noto Sans SC', sans-serif;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 6px 13px;
+    border-radius: 6px;
+    border: 1px solid #4a453e;
+    background: #2c2824;
+    color: #e8e6df;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .sim-btn:hover { background: #3d3731; }
+  .sim-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .sim-stage-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+  }
+  .sim-stage-cell {
+    padding: 13px 15px;
+    border-right: 1px solid var(--border);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .sim-stage-cell:last-child { border-right: none; }
+  .sim-stage-cell:hover { background: #efe9dd; }
+  .sim-stage-cell.active {
+    background: var(--surface);
+    box-shadow: inset 0 3px 0 var(--accent);
+  }
+  .sim-stage-step {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 3px;
+  }
+  .sim-stage-name {
+    font-weight: 700;
+    font-size: 13.5px;
+    color: var(--ink);
+  }
+  .sim-stage-fn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+    margin-top: 3px;
+  }
+  .sim-body {
+    display: grid;
+    grid-template-columns: 1.08fr 1fr;
+    gap: 0;
+  }
+  .sim-left {
+    padding: 22px 24px;
+    border-right: 1px solid var(--border);
+  }
+  .sim-right {
+    padding: 22px 24px;
+    background: #19191f;
+    color: #e8e6df;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.4px;
+    line-height: 1.65;
+  }
+  .sim-kv {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 8px 12px;
+    font-size: 13.5px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--border);
+  }
+  .sim-k {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-3);
+    font-weight: 600;
+  }
+  .sim-v { color: var(--ink); font-weight: 500; }
+
+  /* Tables */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 18px 0 26px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  th {
+    background: var(--bg-warm);
+    color: var(--ink);
+    font-weight: 700;
+    text-align: left;
+    padding: 11px 14px;
+    border-bottom: 2px solid var(--border-strong);
+    font-size: 12.5px;
+  }
+  td {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border);
+    color: var(--ink-2);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface-2); }
+
+  /* Filter tabs for 13 rules */
+  .filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 14px 0;
+  }
+  .filter-btn {
+    font-family: 'Noto Sans SC', sans-serif;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--ink-2);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .filter-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .filter-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .rule-cat-badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .cat-mem { background: var(--accent-soft); color: var(--accent); }
+  .cat-ipc { background: var(--blue-soft); color: var(--blue); }
+  .cat-sys { background: var(--purple-soft); color: var(--purple); }
+
+  /* Diagram Cards */
+  .diagram-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 22px;
+    margin: 20px 0 26px;
+    box-shadow: var(--shadow);
+  }
+  .diagram-caption {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-3);
+    margin-bottom: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  @media (max-width: 1080px) {
+    .layout { grid-template-columns: 1fr; }
+    aside.sidebar {
+      position: static;
+      height: auto;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    main.content { padding: 32px 22px 64px; }
+    .verdict-grid { grid-template-columns: 1fr 1fr; }
+    .plain-vs-grid { grid-template-columns: 1fr; }
+    .sim-stage-grid { grid-template-columns: 1fr 1fr; }
+    .sim-body { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-tag">Frida 17.27.5 · 补充专题</span>
+      <h1>不关 Enforcing 热修改内核 SELinux 策略</h1>
+      <p>基于 frida-core @ 075600d9 逐行拆解 lib/selinux/patch.c (467 行) 与 linjector 打标闭环</p>
+    </div>
+
+    <a class="back-link" href="index.html">← 返回文档索引首页</a>
+    <a class="back-link" href="frida-inject-guide.html#s-selinux">← 返回第二篇：进程注入原理 (§3.0)</a>
+
+    <div class="toc-group">
+      <div class="toc-title">核心章节</div>
+      <ul class="toc-list">
+        <li><a href="#sec-01"><span class="toc-num">01</span>为什么不直接 setenforce 0？</a></li>
+        <li><a href="#sec-02"><span class="toc-num">02</span>零基础看懂一条规则与 MLS 隔离</a></li>
+        <li><a href="#sec-03"><span class="toc-num">03</span>交互演练：libsepol 内存手术四步曲</a></li>
+        <li><a href="#sec-04"><span class="toc-num">04</span>patch.c (467行) 逐函数源码拆解</a></li>
+        <li><a href="#sec-05"><span class="toc-num">05</span>13 条白名单规则全量白话对照表</a></li>
+        <li><a href="#sec-06"><span class="toc-num">06</span>攻防视角：如何检测被热改的策略？</a></li>
+      </ul>
+    </div>
+
+    <div class="toc-group">
+      <div class="toc-title">关键源码锚点</div>
+      <ul class="toc-list">
+        <li><a href="#code-rules"><span class="toc-num">4.1</span>frida_selinux_rules[13]</a></li>
+        <li><a href="#code-ensure-type"><span class="toc-num">4.2</span>frida_ensure_type &amp; MLS 位图</a></li>
+        <li><a href="#code-ensure-rule"><span class="toc-num">4.3</span>$self 解析与 te_avtab 置位</a></li>
+        <li><a href="#code-save-load"><span class="toc-num">4.4</span>/sys/fs/selinux/load 原子热加载</a></li>
+        <li><a href="#code-fsetfilecon"><span class="toc-num">4.5</span>linjector.vala fsetfilecon 闭环</a></li>
+      </ul>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="content">
+    <header class="hero">
+      <div class="hero-kicker">
+        <span class="pill accent">frida-core @ 075600d9 (v17.27.5)</span>
+        <span class="pill blue">lib/selinux/patch.c (1-467 全量解析)</span>
+        <span class="pill green">src/linux/linjector.vala (setfilecon / fsetfilecon)</span>
+        <span class="pill purple">静态链接 libsepol · policydb_t 内存手术</span>
+      </div>
+      <h1>补充专题：Frida 如何在不关 Enforcing 的情况下热修改内核 SELinux 策略？</h1>
+      <p class="subtitle">
+        在 Android 逆向与安全对抗中，几乎所有 App 环境检测都会第一时间读取 <code>getenforce</code> 或 <code>/sys/fs/selinux/enforce</code>。如果用粗暴的 <code>setenforce 0</code> 把 SELinux 切到 Permissive（宽容模式），等于直接向目标 App 亮明“这是一台被动手脚的设备”。Frida 的做法是：<strong>全程保持 <code>Enforcing = 1</code>，把内核正在运行的二进制 SELinux 策略镜像读进内存，用静态编译的 <code>libsepol</code> 现场造出 2 个专属标签、改写 MLS 跨沙箱约束位图、注入 13 条放行规则，再原子写回内核生效。</strong>
+      </p>
+
+      <div class="verdict-grid">
+        <div class="verdict-card">
+          <div class="verdict-label">核心伪装效果</div>
+          <div class="verdict-title">getenforce 始终为 Enforcing</div>
+          <div class="verdict-desc"><code>/sys/fs/selinux/enforce</code> 保持 <code>1</code>（仅模拟器 <code>u:r:shell:s0</code> 兜底分支会闪切毫秒级即刻恢复）。</div>
+        </div>
+        <div class="verdict-card blue">
+          <div class="verdict-label">新增专属类型</div>
+          <div class="verdict-title">frida_file 与 frida_memfd</div>
+          <div class="verdict-desc">在内核策略哈希表里动态注册 2 个新 Type，并同时挂上 <code>file_type</code> 与 <code>mlstrustedobject</code> 属性。</div>
+        </div>
+        <div class="verdict-card green">
+          <div class="verdict-label">攻克 MLS 沙箱隔离</div>
+          <div class="verdict-title">修补编译期 Constraint 位图</div>
+          <div class="verdict-desc">遍历所有 Class 的 MLS 约束表达式，把新 Type 补进已展开的 <code>expr-&gt;names</code> 位图，突破 <code>s0:c512,c768</code> 隔离。</div>
+        </div>
+        <div class="verdict-card purple">
+          <div class="verdict-label">最小权限打孔</div>
+          <div class="verdict-title">13 条 AVTab 规则 + 动态 $self</div>
+          <div class="verdict-desc">通过 <code>getcon()</code> 自动识别 <code>frida-server</code> 自身域（如 <code>su</code>/<code>magisk</code>），在 <code>te_avtab</code> 哈希表按位或置位。</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- SECTION 01 -->
+    <section class="chapter" id="sec-01">
+      <div class="chapter-header">
+        <span class="chapter-num">01</span>
+        <h2>为什么不直接 <code>setenforce 0</code>？（关门禁 vs 改白名单）</h2>
+      </div>
+
+      <p>
+        我们在第二篇《进程注入原理》里看到，<code>frida-server</code> 要把 <code>frida-agent.so</code> 注入到目标 App 里，必须在目标 App 进程内部完成三件对 SELinux 来说<strong>极度敏感</strong>的操作：
+      </p>
+      <ol style="margin: 0 0 18px 22px; color: var(--ink-2);">
+        <li><strong>分配并执行匿名 RWX 内存（<code>execmem</code>）</strong>：Stage 1 的 <code>bootstrapper.bin</code>、Stage 2 的 <code>loader.bin</code> 以及 Gum 的 Inline Hook 跳板（Trampoline）都需要匿名可执行内存；</li>
+        <li><strong>跨进程接收并使用来自 <code>frida-server</code> 的文件描述符（<code>fd { use }</code> + <code>unix_stream_socket</code>）</strong>：通过 <code>SCM_RIGHTS</code> 把装有 <code>frida-agent.so</code> 的匿名内存文件句柄（<code>memfd</code>）和通信 Socket 传进目标 App；</li>
+        <li><strong>在目标 App 里把这块 <code>memfd</code> 映射为可执行代码（<code>file { open, read, write, getattr, execute, map }</code>）</strong>：由 <code>dlopen("/proc/self/fd/N")</code> 加载执行。</li>
+      </ol>
+
+      <div class="plain-board">
+        <div class="plain-board-header">
+          <div class="plain-board-title">💡 大白话类比：小区门禁保安（SELinux 内核安全模块）</div>
+          <span class="plain-badge">零基础秒懂</span>
+        </div>
+        <p style="margin-bottom: 12px;">
+          把 Android 内核的 SELinux 想象成<strong>严苛的大楼门禁系统</strong>。默认情况下，普通住户（目标 App，身份标签是 <code>untrusted_app</code>）绝对不允许接收外来人员（<code>frida-server</code>，身份标签是 <code>su</code> 或 <code>magisk</code>）递过来的包裹（<code>memfd</code> 句柄），也不允许在自己房间里私自搭违建（<code>execmem</code> 可执行内存）。
+        </p>
+        <div class="plain-vs-grid">
+          <div class="plain-vs-card bad">
+            <div class="plain-vs-head">
+              <span class="plain-vs-name">做法 A：直接执行 setenforce 0</span>
+              <span class="plain-vs-tag bad">极易被风控秒杀</span>
+            </div>
+            <p style="font-size: 13.5px; margin-bottom: 8px;">
+              相当于<strong>把整栋大楼的门禁总闸直接拉掉</strong>，所有大门敞开，保安只记账不拦人（Permissive 模式）。
+            </p>
+            <p style="font-size: 13px; color: var(--ink-3); margin-bottom: 0;">
+              <strong>致命缺陷</strong>：大楼门口挂着一块全员可见的指示牌 <code>/sys/fs/selinux/enforce</code>。任何普通 App 不需要 Root 权限，只要调一句读取文件或执行 <code>getenforce</code>，看到返回值变成了 <code>0</code>（Permissive），立刻判定环境异常并闪退。
+            </p>
+          </div>
+          <div class="plain-vs-card good">
+            <div class="plain-vs-head">
+              <span class="plain-vs-name">做法 B：Frida 的内核策略热手术</span>
+              <span class="plain-vs-tag good">门禁总闸保持开启 (1)</span>
+            </div>
+            <p style="font-size: 13.5px; margin-bottom: 8px;">
+              相当于<strong>门禁总闸依然通电（<code>Enforcing = 1</code>），但偷偷走进保安室，在保安手里的《通行白名单手册》里加印了 13 行字</strong>。
+            </p>
+            <p style="font-size: 13px; color: var(--ink-3); margin-bottom: 0;">
+              <strong>精妙之处</strong>：专门给 Frida 的包裹印一个专用防伪章（<code>frida_memfd</code> / <code>frida_file</code>），并在手册里写明：“凡是盖了 <code>frida_memfd</code> 章的包裹，所有住户（<code>domain</code>）都可以正常签收并运行。”
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="sub-header" id="selinuxfs-files">内核留给 Root 的合法后门：<code>/sys/fs/selinux/policy</code> 与 <code>/sys/fs/selinux/load</code></h3>
+      <p>
+        很多同学会好奇：<strong>内核里的 SELinux 策略不是在编译 ROM 时写死在 <code>boot.img</code> / <code>vendor.img</code> 的 <code>sepolicy</code> 文件里吗？开机之后为什么还能改？</strong>
+      </p>
+      <p>
+        这是因为 Linux 内核的 SELinux 子系统挂载了一个虚拟文件系统 <code>selinuxfs</code>（在 Android 上位于 <code>/sys/fs/selinux</code>）。它不仅提供了查看开关状态的 <code>enforce</code> 节点，还提供了两个专门供特权进程（<code>init</code> 或 <code>root</code>）读取和热重载整份策略数据库的接口：
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 240px;">虚拟文件节点</th>
+              <th style="width: 140px;">读写方向</th>
+              <th>内核行为与 Frida 的利用方式</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>/sys/fs/selinux/enforce</code></td>
+              <td>读 / 写 (<code>0</code> 或 <code>1</code>)</td>
+              <td>全局开关。<code>1</code> = Enforcing（强制拦截），<code>0</code> = Permissive（仅记录日志不拦截）。App 拥有读取权限，因此<strong>绝不能长期置为 0</strong>。</td>
+            </tr>
+            <tr>
+              <td><code>/sys/fs/selinux/policy</code></td>
+              <td>只读（二进制流）</td>
+              <td>当你打开并读取这个文件时，Linux 内核会<strong>将当前内存里正在生效的 <code>policydb</code> 状态实时序列化</strong>成一份完整的二进制策略镜像返回给用户态（<code>lib/selinux/patch.c:71</code>）。</td>
+            </tr>
+            <tr>
+              <td><code>/sys/fs/selinux/load</code></td>
+              <td>只写（二进制流）</td>
+              <td>当你把一份合法的二进制策略镜像完整写入该节点时，内核的 <code>sel_write_load()</code> 会<strong>在内核态反序列化新策略并原子替换旧策略表</strong>，同时自动清空 AVC 权限缓存，立即生效且无需重启（<code>lib/selinux/patch.c:148, 211</code>）。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 02 -->
+    <section class="chapter" id="sec-02">
+      <div class="chapter-header">
+        <span class="chapter-num">02</span>
+        <h2>零基础看懂一条 SELinux 规则与 Android 特有的 MLS 跨沙箱隔离</h2>
+      </div>
+
+      <p>
+        在看 <code>lib/selinux/patch.c</code> 的 C 代码之前，我们先用 2 分钟把 SELinux 的两条底层逻辑彻底搞懂：第一是<strong>基本规则四元组（TE 规则）</strong>，第二是很多逆向工程师容易忽略、但如果不处理就会导致注入彻底失败的 <strong>Android MLS 多级安全分类隔离</strong>。
+      </p>
+
+      <h3 class="sub-header">2.1 一条 SELinux 放行规则长什么样？</h3>
+      <p>
+        SELinux 的核心思想是<strong>给所有进程（主体 Subject）和所有文件/Socket/内存（客体 Object）都贴上标签（Context）</strong>。一个完整的标签有四段：<code>用户:角色:类型:安全级别(MLS)</code>，例如目标 App 进程是 <code>u:r:untrusted_app:s0:c512,c768</code>，而 Frida 创建的匿名内存文件被贴上了 <code>u:object_r:frida_memfd:s0</code>。其中最核心的是第三段<strong>类型（Type）</strong>。
+      </p>
+
+      <div class="rule-anatomy">
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #e5c07b; margin-bottom: 12px;">
+          allow &nbsp;<span style="color:#61afef;">domain</span> &nbsp;<span style="color:#98c379;">frida_memfd</span> &nbsp;:&nbsp; <span style="color:#c678dd;">file</span> &nbsp;{ <span style="color:#e06c75;">open read write getattr execute map</span> };
+        </div>
+        <div class="rule-tokens">
+          <div class="rule-token">
+            <div class="rule-token-code" style="color: #61afef;">① Source (谁来访问)</div>
+            <div class="rule-token-role">domain（属性组：代表所有进程）</div>
+            <div class="rule-token-desc">这里没有写死 <code>untrusted_app</code>，而是写了属性组 <code>domain</code>——无论是普通 App、系统 App 还是 <code>system_server</code>，都属于 <code>domain</code>。</div>
+          </div>
+          <div class="rule-token">
+            <div class="rule-token-code" style="color: #98c379;">② Target (访问什么)</div>
+            <div class="rule-token-role">frida_memfd（Frida 自创标签）</div>
+            <div class="rule-token-desc">只有被 <code>frida-server</code> 专门用 <code>fsetfilecon()</code> 盖上 <code>frida_memfd</code> 印章的匿名内存文件才会被放行，不影响系统其他文件。</div>
+          </div>
+          <div class="rule-token">
+            <div class="rule-token-code" style="color: #c678dd;">③ Class (目标的类别)</div>
+            <div class="rule-token-role">file（普通/内存文件类别）</div>
+            <div class="rule-token-desc">告诉内核这条规则只针对“文件”操作生效（其他常见类别还有 <code>dir</code> 目录、<code>process</code> 进程、<code>fd</code> 句柄、<code>unix_stream_socket</code>）。</div>
+          </div>
+          <div class="rule-token">
+            <div class="rule-token-code" style="color: #e06c75;">④ Permissions (允许的动作)</div>
+            <div class="rule-token-role">{ open read write getattr execute map }</div>
+            <div class="rule-token-desc">在内核哈希表 <code>te_avtab</code> 中，每个动作对应一个 32 位整数里的 1 个 Bit（位掩码 <code>1U &lt;&lt; (val - 1)</code>）。</div>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="sub-header" id="mls-trap">2.2 隐藏最深的坑：为什么光加 <code>allow</code> 规则，App 依然读不了 <code>s0</code> 的文件？</h3>
+      <p>
+        如果你自己写过修改 SELinux 的工具，可能会遇到一个极其诡异的现象：<strong>明明已经在 <code>te_avtab</code> 里加了 <code>allow domain frida_memfd:file { ... }</code>，为什么目标 App 在 <code>dlopen("/proc/self/fd/N")</code> 时还是报 <code>avc: denied</code>？</strong>
+      </p>
+      <p>
+        答案就在标签的第四段——<strong>MLS（Multi-Level Security，多级安全类别）</strong>：
+      </p>
+      <ul style="margin: 0 0 16px 22px; color: var(--ink-2);">
+        <li>在现代 Android 中，为了彻底隔离不同 App 的数据，Zygote 在孵化每个普通 App 时，都会根据它的 UID 动态分配一对独一无二的 <strong>MLS Category（类别标签）</strong>，比如微信是 <code>u:r:untrusted_app:s0:c512,c768</code>，淘宝是 <code>u:r:untrusted_app:s0:c513,c769</code>。</li>
+        <li>而 <code>frida-server</code> 是以 Root 身份在后台运行的（<code>u:r:su:s0</code>），它创建并打标的 <code>memfd</code> 或临时文件，第四段安全级别固定是 <strong><code>s0</code>（不带任何 <code>cXXX</code> 后缀）</strong>。</li>
+        <li>Android 的 SELinux 策略里有一条铁律（<strong>MLS Constraint 约束表达式</strong>）：带有具体 <code>cXXX</code> 分类的 App 进程，在读写/执行一个 <code>s0</code> 对象时，除非该对象的类型拥有 <strong><code>mlstrustedobject</code>（MLS 受信任客体）</strong> 属性，否则一律被 MLS 约束拦截！</li>
+      </ul>
+
+      <div class="callout amber">
+        <div class="callout-title">🔥 源码级绝技：为什么在二进制策略里挂上 <code>mlstrustedobject</code> 属性还不够？（<code>patch.c:276, 294-320</code>）</div>
+        <p>
+          在未编译的 <code>.te</code> 源码策略里，只要写一句 <code>typeattribute frida_memfd mlstrustedobject;</code>，编译器 <code>checkpolicy</code> 就会自动把 <code>frida_memfd</code> 写进所有 MLS 约束里。
+          <strong>但在已经编译好的内核二进制策略（<code>/sys/fs/selinux/policy</code>）中，所有 Class 的 MLS 约束表达式（<code>constraint_expr_t</code>）在当初编译 ROM 时就已经把属性展开成静态的 Type 位图（<code>expr-&gt;names</code>）了！</strong>
+        </p>
+        <p>
+          因此，Frida 的作者 Ole André Vadla Ravnås 在 <code>patch.c:294-320</code> 专门写了一个函数 <code>frida_add_type_to_class_constraints_referencing_attribute()</code>：遍历内核里每一个 Class 的每一条 Constraint 表达式，只要发现某个表达式当年引用过 <code>mlstrustedobject</code>（记录在 <code>expr-&gt;type_names-&gt;types</code> 中），就手动把新诞生的 <code>frida_file</code> 和 <code>frida_memfd</code> 的 <code>type_id</code> 补进已经展开的 <code>expr-&gt;names</code> 位图里！
+        </p>
+      </div>
+    </section>
+
+    <!-- SECTION 03 -->
+    <section class="chapter" id="sec-03">
+      <div class="chapter-header">
+        <span class="chapter-num">03</span>
+        <h2>交互式演练：<code>libsepol</code> 内存外科手术四步曲</h2>
+      </div>
+
+      <p>
+        <code>frida-server</code> 内部静态链接了 SELinux 官方的策略操作库 <strong><code>libsepol</code></strong>。当 <code>frida_selinux_patch_policy()</code>（<code>lib/selinux/patch.c:59</code>）被调用时，它在用户态内存中对内核策略数据库 <code>policydb_t</code> 实施了四步精密手术。点击下方四个阶段即可查看每一步修改的内核数据结构与真实源码行号：
+      </p>
+
+      <div class="sim-box">
+        <div class="sim-header">
+          <h4>🛠️ policydb_t 内存手术台 (lib/selinux/patch.c @ 075600d9)</h4>
+          <div class="sim-controls">
+            <button class="sim-btn active" onclick="selectSurgeryStage(0)" id="surg-btn-0">Step 1 · 读取与反序列化</button>
+            <button class="sim-btn" onclick="selectSurgeryStage(1)" id="surg-btn-1">Step 2 · 造新 Type &amp; 破 MLS</button>
+            <button class="sim-btn" onclick="selectSurgeryStage(2)" id="surg-btn-2">Step 3 · 解析 $self &amp; 改 AVTab</button>
+            <button class="sim-btn" onclick="selectSurgeryStage(3)" id="surg-btn-3">Step 4 · 原子写回内核 &amp; 兜底</button>
+          </div>
+        </div>
+
+        <div class="sim-stage-grid">
+          <div class="sim-stage-cell active" onclick="selectSurgeryStage(0)" id="surg-cell-0">
+            <div class="sim-stage-step">STEP 01 · L71-83</div>
+            <div class="sim-stage-name">反序列化内核策略</div>
+            <div class="sim-stage-fn">frida_load_policy()</div>
+          </div>
+          <div class="sim-stage-cell" onclick="selectSurgeryStage(1)" id="surg-cell-1">
+            <div class="sim-stage-step">STEP 02 · L85-97</div>
+            <div class="sim-stage-name">注册类型并修补 MLS 位图</div>
+            <div class="sim-stage-fn">frida_ensure_type()</div>
+          </div>
+          <div class="sim-stage-cell" onclick="selectSurgeryStage(2)" id="surg-cell-2">
+            <div class="sim-stage-step">STEP 03 · L99-145</div>
+            <div class="sim-stage-name">注入 13 条 AVTab 规则</div>
+            <div class="sim-stage-fn">frida_ensure_rule()</div>
+          </div>
+          <div class="sim-stage-cell" onclick="selectSurgeryStage(3)" id="surg-cell-3">
+            <div class="sim-stage-step">STEP 04 · L147-168</div>
+            <div class="sim-stage-name">重打包并热加载入核</div>
+            <div class="sim-stage-fn">frida_save_policy()</div>
+          </div>
+        </div>
+
+        <div class="sim-body">
+          <div class="sim-left" id="surg-left">
+            <!-- Populated by JS -->
+          </div>
+          <div class="sim-right" id="surg-right">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Visual Flowchart of the 4 steps -->
+      <div class="diagram-card">
+        <div class="diagram-caption">
+          <span>图 3-1：Frida SELinux 热补丁从读取内核镜像到注入时 fsetfilecon 打标的完整闭环</span>
+          <span>Enforcing=1 全程保持</span>
+        </div>
+        <svg viewBox="0 0 980 280" width="100%" height="auto" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arr-ink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#4a453e"/>
+            </marker>
+            <marker id="arr-acc" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#b83a1b"/>
+            </marker>
+            <marker id="arr-grn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#1b6b45"/>
+            </marker>
+          </defs>
+
+          <!-- Kernel Zone -->
+          <rect x="16" y="16" width="948" height="86" rx="8" fill="#e8f0fa" stroke="#1d4e89" stroke-width="1.5"/>
+          <text x="32" y="38" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="#1d4e89">LINUX KERNEL · selinuxfs (/sys/fs/selinux) · Enforcing = 1</text>
+
+          <rect x="32" y="48" width="210" height="42" rx="6" fill="#ffffff" stroke="#1d4e89"/>
+          <text x="137" y="67" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" font-weight="600" fill="#1e1b18">/sys/fs/selinux/policy</text>
+          <text x="137" y="82" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#4a453e">实时导出当前二进制策略流</text>
+
+          <rect x="380" y="48" width="230" height="42" rx="6" fill="#ffffff" stroke="#1d4e89"/>
+          <text x="495" y="67" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" font-weight="600" fill="#1e1b18">/sys/fs/selinux/load</text>
+          <text x="495" y="82" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#4a453e">原子替换内核 policydb &amp; 刷 AVC</text>
+
+          <rect x="710" y="48" width="236" height="42" rx="6" fill="#e6f4ec" stroke="#1b6b45" stroke-width="1.5"/>
+          <text x="828" y="67" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="#1b6b45">AVC 权限校验器 (Enforcing=1)</text>
+          <text x="828" y="82" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1b6b45">查新表：允许目标 App 映射 memfd！</text>
+
+          <!-- User Space Zone -->
+          <rect x="16" y="124" width="948" height="142" rx="8" fill="#fffdf9" stroke="#cfc5b3" stroke-width="1.5"/>
+          <text x="32" y="146" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="#b83a1b">USER SPACE · frida-server (静态链接 libsepol) 与目标 App 注入闭环</text>
+
+          <!-- Box 1 -->
+          <rect x="32" y="160" width="195" height="90" rx="6" fill="#ffffff" stroke="#b83a1b" stroke-width="1.5"/>
+          <text x="129" y="180" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#b83a1b">① policydb_read()</text>
+          <text x="129" y="198" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#1e1b18">反序列化为内存结构体</text>
+          <text x="129" y="216" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#7c7468">p_types / te_avtab</text>
+          <text x="129" y="234" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#7c7468">type_attr_map / constraints</text>
+
+          <!-- Box 2 -->
+          <rect x="255" y="160" width="235" height="90" rx="6" fill="#faeae5" stroke="#b83a1b" stroke-width="1.5"/>
+          <text x="372" y="180" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#b83a1b">② 内存外科手术 (patch.c)</text>
+          <text x="372" y="198" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#1e1b18">+ frida_file / frida_memfd</text>
+          <text x="372" y="216" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#1e1b18">+ 修补 mlstrustedobject 位图</text>
+          <text x="372" y="234" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#1e1b18">+ 写入 13 条规则 (含动态 $self)</text>
+
+          <!-- Box 3 -->
+          <rect x="518" y="160" width="165" height="90" rx="6" fill="#ffffff" stroke="#1d4e89" stroke-width="1.5"/>
+          <text x="600" y="180" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#1d4e89">③ policydb_to_image</text>
+          <text x="600" y="198" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#1e1b18">重新序列化为二进制</text>
+          <text x="600" y="216" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#1e1b18">直接 write() 进 load</text>
+          <text x="600" y="234" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#7c7468">不落盘任何临时文件</text>
+
+          <!-- Box 4 -->
+          <rect x="710" y="160" width="236" height="90" rx="6" fill="#e6f4ec" stroke="#1b6b45" stroke-width="1.5"/>
+          <text x="828" y="180" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#1b6b45">④ linjector 打标闭环</text>
+          <text x="828" y="198" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#1e1b18">fsetfilecon(memfd, "frida_memfd")</text>
+          <text x="828" y="216" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#1e1b18">setfilecon(path, "frida_file")</text>
+          <text x="828" y="234" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1b6b45">SCM_RIGHTS 传给 App 顺利 dlopen</text>
+
+          <!-- Arrows -->
+          <line x1="130" y1="90" x2="130" y2="156" stroke="#1d4e89" stroke-width="2" marker-end="url(#arr-ink)"/>
+          <line x1="227" y1="205" x2="251" y2="205" stroke="#b83a1b" stroke-width="2" marker-end="url(#arr-acc)"/>
+          <line x1="490" y1="205" x2="514" y2="205" stroke="#b83a1b" stroke-width="2" marker-end="url(#arr-acc)"/>
+          <path d="M 600 160 L 600 120 L 495 120 L 495 94" fill="none" stroke="#1d4e89" stroke-width="2" marker-end="url(#arr-ink)"/>
+          <line x1="610" y1="69" x2="704" y2="69" stroke="#1b6b45" stroke-width="2" marker-end="url(#arr-grn)"/>
+          <line x1="828" y1="160" x2="828" y2="94" stroke="#1b6b45" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#arr-grn)"/>
+        </svg>
+      </div>
+    </section>
+
+    <!-- SECTION 04 -->
+    <section class="chapter" id="sec-04">
+      <div class="chapter-header">
+        <span class="chapter-num">04</span>
+        <h2>逐行源码拆解：<code>lib/selinux/patch.c</code> (467 行) 与 <code>linjector.vala</code> 打标闭环</h2>
+      </div>
+
+      <p>
+        下面我们按照实际执行顺序，把 <code>frida-core @ 075600d9</code> 中 <code>lib/selinux/patch.c</code> 的全部 467 行代码拆解为 5 个核心模块逐一剖析。所有行号均与官方仓库 <code>075600d94f1a78c389c5da7d81dd72077e3de85d</code> 严格一致。
+      </p>
+
+      <!-- 4.1 -->
+      <h3 class="sub-header" id="code-rules">4.1 数据驱动的 13 条规则表：<code>frida_selinux_rules[]</code>（<code>patch.c:29-54</code>）</h3>
+      <p>
+        在文件顶部，Frida 定义了一个简洁的 <code>FridaSelinuxRule</code> 结构体和包含 13 条规则的静态常量数组 <code>frida_selinux_rules[]</code>。注意其中两个非常精妙的语法糖：
+      </p>
+      <ul style="margin: 0 0 14px 22px; color: var(--ink-2);">
+        <li><strong><code>?</code> 问号前缀（可选类型/可选权限）</strong>：例如 <code>?map</code>、<code>?app_zygote</code>、<code>?apex_art_data_file</code>。因为不同 Android 版本（从 Android 5 到 Android 15+）的内核 SELinux 定义不完全一样（比如旧内核的 <code>file</code> 类没有 <code>map</code> 权限，Android 9 以下没有 <code>app_zygote</code> 和 <code>apex_art_data_file</code>），带 <code>?</code> 前缀的项在查找不到时会被静默跳过而不会报错中止！</li>
+        <li><strong><code>$self</code> 动态占位符</strong>：代表 <code>frida-server</code> 当前运行所在的 SELinux 域（通过 <code>getcon()</code> 动态获取，比如 <code>su</code>、<code>magisk</code>、<code>shell</code>）。</li>
+      </ul>
+
+      <div class="code-panel">
+        <div class="code-topbar">
+          <span class="code-file">frida-core/lib/selinux/patch.c (Lines 29–54)</span>
+          <span class="code-meta">commit 075600d9 · 13 条核心 SELinux 规则定义</span>
+        </div>
+        <pre class="code-body"><span class="kw">typedef struct</span> _FridaSelinuxRule <span class="ty">FridaSelinuxRule</span>;
+
+<span class="kw">struct</span> _FridaSelinuxRule
+{
+  <span class="kw">const</span> <span class="ty">gchar</span> * source;
+  <span class="kw">const</span> <span class="ty">gchar</span> * target;
+  <span class="kw">const</span> <span class="ty">gchar</span> * klass;
+  <span class="kw">const</span> <span class="ty">gchar</span> * permissions[<span class="nu">7</span>];
+};
+
+<span class="kw">static const</span> <span class="ty">FridaSelinuxRule</span> frida_selinux_rules[] =
+{
+<span class="hl-line">  { <span class="st">"domain"</span>, <span class="st">"domain"</span>, <span class="st">"process"</span>, { <span class="st">"execmem"</span>, <span class="nu">NULL</span> } },</span>
+  { <span class="st">"domain"</span>, <span class="st">"frida_file"</span>, <span class="st">"dir"</span>, { <span class="st">"search"</span>, <span class="nu">NULL</span> } },
+  { <span class="st">"domain"</span>, <span class="st">"frida_file"</span>, <span class="st">"file"</span>, { <span class="st">"open"</span>, <span class="st">"read"</span>, <span class="st">"getattr"</span>, <span class="st">"execute"</span>, <span class="st">"?map"</span>, <span class="nu">NULL</span> } },
+<span class="hl-line">  { <span class="st">"domain"</span>, <span class="st">"frida_memfd"</span>, <span class="st">"file"</span>, { <span class="st">"open"</span>, <span class="st">"read"</span>, <span class="st">"write"</span>, <span class="st">"getattr"</span>, <span class="st">"execute"</span>, <span class="st">"?map"</span>, <span class="nu">NULL</span> } },</span>
+  { <span class="st">"domain"</span>, <span class="st">"shell_data_file"</span>, <span class="st">"dir"</span>, { <span class="st">"search"</span>, <span class="nu">NULL</span> } },
+  { <span class="st">"domain"</span>, <span class="st">"zygote_exec"</span>, <span class="st">"file"</span>, { <span class="st">"execute"</span>, <span class="nu">NULL</span> } },
+<span class="hl-line">  { <span class="st">"domain"</span>, <span class="st">"$self"</span>, <span class="st">"process"</span>, { <span class="st">"sigchld"</span>, <span class="nu">NULL</span> } },</span>
+<span class="hl-line">  { <span class="st">"domain"</span>, <span class="st">"$self"</span>, <span class="st">"fd"</span>, { <span class="st">"use"</span>, <span class="nu">NULL</span> } },</span>
+<span class="hl-line">  { <span class="st">"domain"</span>, <span class="st">"$self"</span>, <span class="st">"unix_stream_socket"</span>, { <span class="st">"connectto"</span>, <span class="st">"read"</span>, <span class="st">"write"</span>, <span class="st">"getattr"</span>, <span class="st">"getopt"</span>, <span class="nu">NULL</span> } },</span>
+  { <span class="st">"domain"</span>, <span class="st">"$self"</span>, <span class="st">"tcp_socket"</span>, { <span class="st">"read"</span>, <span class="st">"write"</span>, <span class="st">"getattr"</span>, <span class="st">"getopt"</span>, <span class="nu">NULL</span> } },
+  { <span class="st">"zygote"</span>, <span class="st">"zygote"</span>, <span class="st">"capability"</span>, { <span class="st">"sys_ptrace"</span>, <span class="nu">NULL</span> } },
+  { <span class="st">"?app_zygote"</span>, <span class="st">"zygote_exec"</span>, <span class="st">"file"</span>, { <span class="st">"read"</span>, <span class="nu">NULL</span> } },
+  { <span class="st">"system_server"</span>, <span class="st">"?apex_art_data_file"</span>, <span class="st">"file"</span>, { <span class="st">"execute"</span>, <span class="nu">NULL</span> } },
+};</pre>
+      </div>
+
+      <!-- 4.2 -->
+      <h3 class="sub-header" id="code-ensure-type">4.2 动态造 Type 与修补 MLS 约束位图：<code>frida_ensure_type()</code>（<code>patch.c:216-320</code>）</h3>
+      <p>
+        在主入口 <code>frida_selinux_patch_policy()</code>（<code>L85-97</code>）中，代码读取完 <code>/sys/fs/selinux/policy</code> 后做的第一件事就是调用两次 <code>frida_ensure_type()</code>：
+      </p>
+      <ul style="margin: 0 0 14px 22px; color: var(--ink-2);">
+        <li><code>frida_ensure_type (&amp;db, "frida_file", "file_type", "mlstrustedobject", NULL)</code>（<code>L85</code>）</li>
+        <li><code>frida_ensure_type (&amp;db, "frida_memfd", "file_type", "mlstrustedobject", NULL)</code>（<code>L92</code>）</li>
+      </ul>
+      <p>
+        让我们看 <code>frida_ensure_type()</code> 如何在已编译的 <code>policydb_t</code> 里凭空造出一个新的 Type 并挂上属性：
+      </p>
+
+      <div class="code-panel">
+        <div class="code-topbar">
+          <span class="code-file">frida-core/lib/selinux/patch.c (Lines 216–320)</span>
+          <span class="code-meta">commit 075600d9 · 动态扩容 p_types 符号表与修补 MLS Constraint 位图</span>
+        </div>
+        <pre class="code-body"><span class="kw">static</span> <span class="ty">gboolean</span>
+<span class="fn">frida_ensure_type</span> (<span class="ty">policydb_t</span> * db, <span class="kw">const</span> <span class="ty">gchar</span> * type_name, <span class="kw">const</span> <span class="ty">gchar</span> * attr1, ...)
+{
+  <span class="ty">type_datum_t</span> * type;
+  <span class="ty">uint32_t</span> type_id;
+  <span class="cm">/* 1. 先查 p_types 符号哈希表：如果已经打过补丁存在该类型，直接复用其 type_id */</span>
+  type = <span class="fn">hashtab_search</span> (db-&gt;p_types.table, (<span class="ty">hashtab_key_t</span>) type_name);
+  <span class="kw">if</span> (type == <span class="nu">NULL</span>)
+  {
+    type = <span class="fn">malloc</span> (<span class="kw">sizeof</span> (<span class="ty">type_datum_t</span>));
+    <span class="fn">type_datum_init</span> (type);
+<span class="hl-line">    type_id = ++db-&gt;p_types.nprim; <span class="cm">/* 分配新的递增 type_id (1-based) */</span></span>
+    type-&gt;s.value = type_id;
+    type-&gt;primary = <span class="nu">1</span>;
+    type-&gt;flavor = TYPE_TYPE;
+
+    <span class="cm">/* 2. 将新类型插入 p_types 符号表并重建 sym_val_to_name 索引 */</span>
+    <span class="fn">hashtab_insert</span> (db-&gt;p_types.table, (<span class="ty">hashtab_key_t</span>) <span class="fn">strdup</span> (type_name), type);
+    <span class="fn">policydb_index_decls</span> (<span class="nu">NULL</span>, db);
+    <span class="fn">policydb_index_others</span> (<span class="nu">NULL</span>, db, <span class="nu">FALSE</span>);
+
+<span class="hl-line">    <span class="cm">/* 3. 扩容 type_attr_map 与 attr_type_map 二维位图数组，并把新类型自身置位 */</span></span>
+    db-&gt;type_attr_map = <span class="fn">realloc</span> (db-&gt;type_attr_map, db-&gt;p_types.nprim * <span class="kw">sizeof</span> (<span class="ty">ebitmap_t</span>));
+    db-&gt;attr_type_map = <span class="fn">realloc</span> (db-&gt;attr_type_map, db-&gt;p_types.nprim * <span class="kw">sizeof</span> (<span class="ty">ebitmap_t</span>));
+    <span class="fn">ebitmap_init</span> (&amp;db-&gt;type_attr_map[type_id - <span class="nu">1</span>]);
+    <span class="fn">ebitmap_init</span> (&amp;db-&gt;attr_type_map[type_id - <span class="nu">1</span>]);
+    <span class="fn">ebitmap_set_bit</span> (&amp;db-&gt;type_attr_map[type_id - <span class="nu">1</span>], type_id - <span class="nu">1</span>, <span class="nu">1</span>);
+  }
+  <span class="kw">else</span>
+  {
+    type_id = type-&gt;s.value;
+  }
+
+  <span class="cm">/* 4. 遍历可变参数列表 ("file_type", "mlstrustedobject")，双向绑定属性位图 */</span>
+  <span class="fn">va_start</span> (args, attr1);
+  <span class="kw">for</span> (attr_name = attr1; attr_name != <span class="nu">NULL</span>; attr_name = <span class="fn">va_arg</span> (args, <span class="kw">const</span> <span class="ty">gchar</span> *))
+  {
+    <span class="ty">type_datum_t</span> * attr = <span class="fn">hashtab_search</span> (db-&gt;p_types.table, (<span class="ty">hashtab_key_t</span>) attr_name);
+    <span class="ty">uint32_t</span> attr_id = attr-&gt;s.value;
+
+    <span class="fn">ebitmap_set_bit</span> (&amp;db-&gt;type_attr_map[type_id - <span class="nu">1</span>], attr_id - <span class="nu">1</span>, <span class="nu">1</span>);
+    <span class="fn">ebitmap_set_bit</span> (&amp;db-&gt;attr_type_map[attr_id - <span class="nu">1</span>], type_id - <span class="nu">1</span>, <span class="nu">1</span>);
+
+<span class="hl-line">    <span class="cm">/* 5. 点睛之笔：同步修补所有 Class 里引用了该属性 (如 mlstrustedobject) 的编译期 Constraint 位图！ */</span></span>
+<span class="hl-line">    <span class="kw">if</span> (!<span class="fn">frida_add_type_to_class_constraints_referencing_attribute</span> (db, type_id, attr_id, error))</span>
+      <span class="kw">goto</span> failure;
+  }
+  <span class="fn">va_end</span> (args);
+  <span class="kw">return</span> <span class="nu">TRUE</span>;
+}
+
+<span class="kw">static</span> <span class="ty">gboolean</span>
+<span class="fn">frida_add_type_to_class_constraints_referencing_attribute</span> (<span class="ty">policydb_t</span> * db, <span class="ty">uint32_t</span> type_id, <span class="ty">uint32_t</span> attribute_id, <span class="ty">GError</span> ** error)
+{
+  <span class="ty">uint32_t</span> class_index;
+  <span class="kw">for</span> (class_index = <span class="nu">0</span>; class_index != db-&gt;p_classes.nprim; class_index++)
+  {
+    <span class="ty">class_datum_t</span> * klass = db-&gt;class_val_to_struct[class_index];
+    <span class="ty">constraint_node_t</span> * node;
+    <span class="kw">for</span> (node = klass-&gt;constraints; node != <span class="nu">NULL</span>; node = node-&gt;next)
+    {
+      <span class="ty">constraint_expr_t</span> * expr;
+      <span class="kw">for</span> (expr = node-&gt;expr; expr != <span class="nu">NULL</span>; expr = expr-&gt;next)
+      {
+<span class="hl-line">        <span class="kw">if</span> (expr-&gt;expr_type == CEXPR_NAMES &amp;&amp; <span class="fn">ebitmap_get_bit</span> (&amp;expr-&gt;type_names-&gt;types, attribute_id - <span class="nu">1</span>))</span>
+<span class="hl-line">        {</span>
+<span class="hl-line">          <span class="fn">ebitmap_set_bit</span> (&amp;expr-&gt;names, type_id - <span class="nu">1</span>, <span class="nu">1</span>);</span>
+<span class="hl-line">        }</span>
+      }
+    }
+  }
+  <span class="kw">return</span> <span class="nu">TRUE</span>;
+}</pre>
+      </div>
+
+      <!-- 4.3 -->
+      <h3 class="sub-header" id="code-ensure-rule">4.3 动态解析 <code>$self</code> 与改写 <code>te_avtab</code> 哈希表：<code>frida_ensure_rule()</code>（<code>patch.c:342-424</code>）</h3>
+      <p>
+        接下来，主循环遍历 <code>frida_selinux_rules[13]</code>。在进入循环前（<code>L99-145</code>），代码先判断规则中的 <code>source</code> 或 <code>target</code> 是否以 <code>?</code> 开头：如果是可选类型且当前内核不存在该类型，直接跳过整条规则（<code>if (is_important) return FALSE; else continue;</code>）。
+      </p>
+      <p>
+        对于每一条有效规则，调用 <code>frida_ensure_rule()</code> 完成三件事：
+      </p>
+      <ol style="margin: 0 0 14px 22px; color: var(--ink-2);">
+        <li><strong>动态解析 <code>$self</code>（<code>L359-374</code>）</strong>：如果 <code>target</code> 是 <code>"$self"</code>，调用 <code>getcon (&amp;self_context)</code> 获取 <code>frida-server</code> 进程当前的 SELinux 上下文（例如 <code>"u:r:su:s0"</code> 或 Magisk 下的 <code>"u:r:magisk:s0"</code>），按冒号 <code>":"</code> 分割取下标 <code>tokens[2]</code>（即 <code>"su"</code> 或 <code>"magisk"</code>）作为真实的 <code>target</code> 类型名！</li>
+        <li><strong>双表查找权限位（<code>L393-401</code>）</strong>：在 SELinux 中，有些权限定义在类本身（如 <code>file</code> 类的 <code>execute</code>），而许多通用权限（如 <code>read</code>、<code>write</code>、<code>open</code>、<code>getattr</code>）定义在公共权限表 <code>klass-&gt;comdatum-&gt;permissions.table</code> 中。Frida 先查类自身表，查不到再查 <code>comdatum</code> 公共表，拿到权限编号后计算出位掩码 <code>perm_bit = 1U &lt;&lt; (perm-&gt;s.value - 1)</code>。</li>
+        <li><strong>在 <code>db-&gt;te_avtab</code> 哈希表中插入或按位或（<code>L403-422</code>）</strong>：构造四元组查询键 <code>avtab_key_t key = { source-&gt;s.value, target-&gt;s.value, klass-&gt;s.value, AVTAB_ALLOWED }</code>。如果哈希表里还没有这条边，就调用 <code>avtab_insert()</code> 新建一条；最后执行一句 <code>av-&gt;data |= perm_bit;</code> 将权限位打开！</li>
+      </ol>
+
+      <div class="code-panel">
+        <div class="code-topbar">
+          <span class="code-file">frida-core/lib/selinux/patch.c (Lines 342–424)</span>
+          <span class="code-meta">commit 075600d9 · $self 动态识别与 te_avtab 权限位掩码写入</span>
+        </div>
+        <pre class="code-body"><span class="kw">static</span> <span class="ty">gboolean</span>
+<span class="fn">frida_ensure_rule</span> (<span class="ty">policydb_t</span> * db, <span class="kw">const</span> <span class="ty">FridaSelinuxRule</span> * rule, <span class="ty">type_datum_t</span> * source, <span class="ty">type_datum_t</span> * target, <span class="ty">GError</span> ** error)
+{
+  <span class="ty">gchar</span> * self_context = <span class="nu">NULL</span>;
+  <span class="ty">gchar</span> ** tokens = <span class="nu">NULL</span>;
+
+<span class="hl-line">  <span class="cm">/* 1. 如果 target 是 "$self"，通过 getcon() 动态提取 frida-server 当前所在的 SELinux type */</span></span>
+  <span class="kw">if</span> (target == <span class="nu">NULL</span> &amp;&amp; <span class="fn">strcmp</span> (rule-&gt;target, <span class="st">"$self"</span>) == <span class="nu">0</span>)
+  {
+    <span class="kw">if</span> (<span class="fn">getcon</span> (&amp;self_context) != <span class="nu">0</span>)
+      <span class="kw">goto</span> failure;
+
+    tokens = <span class="fn">g_strsplit</span> (self_context, <span class="st">":"</span>, <span class="nu">4</span>); <span class="cm">/* 例如 "u:r:su:s0" -&gt; tokens[2] == "su" */</span>
+    target = <span class="fn">hashtab_search</span> (db-&gt;p_types.table, tokens[<span class="nu">2</span>]);
+  }
+
+  <span class="ty">class_datum_t</span> * klass = <span class="fn">hashtab_search</span> (db-&gt;p_classes.table, (<span class="ty">hashtab_key_t</span>) rule-&gt;klass);
+
+  <span class="kw">for</span> (perm_cursor = rule-&gt;permissions; *perm_cursor != <span class="nu">NULL</span>; perm_cursor++)
+  {
+    <span class="kw">const</span> <span class="ty">gchar</span> * perm_name = *perm_cursor;
+    <span class="ty">gboolean</span> is_important = <span class="nu">TRUE</span>;
+    <span class="kw">if</span> (perm_name[<span class="nu">0</span>] == <span class="st">'?'</span>) { is_important = <span class="nu">FALSE</span>; perm_name++; }
+
+    <span class="cm">/* 2. 先查 Class 专属权限表，若无则查 comdatum (Common Permissions) 公共权限表 */</span>
+    <span class="ty">perm_datum_t</span> * perm = <span class="fn">hashtab_search</span> (klass-&gt;permissions.table, (<span class="ty">hashtab_key_t</span>) perm_name);
+    <span class="kw">if</span> (perm == <span class="nu">NULL</span> &amp;&amp; klass-&gt;comdatum != <span class="nu">NULL</span>)
+      perm = <span class="fn">hashtab_search</span> (klass-&gt;comdatum-&gt;permissions.table, (<span class="ty">hashtab_key_t</span>) perm_name);
+    <span class="kw">if</span> (perm == <span class="nu">NULL</span> &amp;&amp; !is_important)
+      <span class="kw">continue</span>; <span class="cm">/* 如旧内核无 ?map 权限，静默跳过 */</span>
+
+<span class="hl-line">    <span class="ty">uint32_t</span> perm_bit = <span class="nu">1U</span> &lt;&lt; (perm-&gt;s.value - <span class="nu">1</span>);</span>
+    <span class="ty">avtab_key_t</span> key = {
+      .source_type = source-&gt;s.value,
+      .target_type = target-&gt;s.value,
+      .target_class = klass-&gt;s.value,
+      .specified = AVTAB_ALLOWED,
+    };
+
+    <span class="ty">avtab_datum_t</span> * av = <span class="fn">avtab_search</span> (&amp;db-&gt;te_avtab, &amp;key);
+    <span class="kw">if</span> (av == <span class="nu">NULL</span>)
+    {
+      <span class="ty">avtab_datum_t</span> new_av = { .data = <span class="nu">0</span> };
+      <span class="fn">avtab_insert</span> (&amp;db-&gt;te_avtab, &amp;key, &amp;new_av);
+      av = <span class="fn">avtab_search</span> (&amp;db-&gt;te_avtab, &amp;key);
+    }
+<span class="hl-line">    av-&gt;data |= perm_bit; <span class="cm">/* 按位或打开权限位 */</span></span>
+  }
+  <span class="kw">return</span> <span class="nu">TRUE</span>;
+}</pre>
+      </div>
+
+      <!-- 4.4 -->
+      <h3 class="sub-header" id="code-save-load">4.4 序列化写回 <code>/sys/fs/selinux/load</code> 与模拟器 <code>shell</code> 域兜底（<code>patch.c:147-168, 203-213, 429-466</code>）</h3>
+      <p>
+        当内存中所有的类型、MLS 位图和 13 条规则都修改完毕后，<code>frida_save_policy()</code> 调用 <code>policydb_to_image(NULL, db, &amp;data, &amp;size)</code> 把内存结构体重新打包成内核格式的二进制字节流，并通过自实现的 <code>frida_set_file_contents("/sys/fs/selinux/load", data, size)</code> 一次性写入内核。
+      </p>
+      <p>
+        这里有两个非常讲究的工程细节：
+      </p>
+      <ul style="margin: 0 0 14px 22px; color: var(--ink-2);">
+        <li><strong>为什么不用 GLib 的 <code>g_file_set_contents()</code>？（<code>L429-466</code>）</strong>：因为标准库的 <code>g_file_set_contents()</code> 为了原子性，会先在同目录创建临时文件 <code>/sys/fs/selinux/load.XXXXXX</code> 再 <code>rename</code>。但 <code>/sys/fs/selinux</code> 是内核虚拟文件系统 <code>selinuxfs</code>，根本不允许创建临时文件！所以 Frida 专门写了 <code>frida_set_file_contents()</code>，直接 <code>open("/sys/fs/selinux/load", O_RDWR)</code> 并循环 <code>write()</code>。</li>
+        <li><strong>模拟器 <code>u:r:shell:s0</code> 权限受限时的毫秒级闪切兜底（<code>L148-168</code>）</strong>：在部分官方 Android 模拟器上，Root 进程可能运行在受限的 <code>u:r:shell:s0</code> 域下，而默认策略不允许 <code>shell</code> 域直接向 <code>/sys/fs/selinux/load</code> 写入新策略，却允许它调用 <code>security_setenforce(0)</code>！于是 Frida 做了一个极其聪明的 Fallback：如果第一次写 <code>/sys/fs/selinux/load</code> 失败，且当前正在 Enforcing 模式，它会<strong>短暂执行 <code>security_setenforce(0)</code> → 在内存中把 <code>shell</code> 域加入 <code>db.permissive_map</code>（<code>frida_ensure_permissive(&amp;db, "shell")</code>）→ 重新把策略写进 <code>/sys/fs/selinux/load</code> → 立即调用 <code>security_setenforce(1)</code> 恢复 Enforcing！</strong></li>
+      </ul>
+
+      <div class="code-panel">
+        <div class="code-topbar">
+          <span class="code-file">frida-core/lib/selinux/patch.c (Lines 147–168 &amp; 203–213)</span>
+          <span class="code-meta">commit 075600d9 · 热加载入核与模拟器 shell 域毫秒级兜底</span>
+        </div>
+        <pre class="code-body">  res = <span class="fn">frida_save_policy</span> (&amp;db, &amp;save_error);
+  <span class="kw">if</span> (!res)
+  {
+    <span class="cm">/* 兜底分支：部分模拟器上 root 处于 u:r:shell:s0，被禁止写 /sys/fs/selinux/load */</span>
+    <span class="kw">if</span> (<span class="fn">security_getenforce</span> () == <span class="nu">1</span> &amp;&amp; <span class="fn">security_setenforce</span> (<span class="nu">0</span>) == <span class="nu">0</span>)
+    {
+      <span class="fn">g_clear_error</span> (&amp;save_error);
+
+<span class="hl-line">      <span class="cm">/* 将 shell 域标记进 db-&gt;permissive_map，写回策略后立即恢复 security_setenforce(1) */</span></span>
+      <span class="kw">if</span> (<span class="fn">frida_ensure_permissive</span> (&amp;db, <span class="st">"shell"</span>, &amp;error))
+        res = <span class="fn">frida_save_policy</span> (&amp;db, &amp;save_error);
+
+<span class="hl-line">      <span class="fn">security_setenforce</span> (<span class="nu">1</span>);</span>
+    }
+  }
+
+<span class="cm">/* ── frida_save_policy (Lines 203-213) ── */</span>
+<span class="kw">static</span> <span class="ty">gboolean</span>
+<span class="fn">frida_save_policy</span> (<span class="ty">policydb_t</span> * db, <span class="ty">GError</span> ** error)
+{
+  <span class="ty">gpointer</span> data;
+  <span class="ty">size_t</span> size;
+
+  <span class="kw">if</span> (<span class="fn">policydb_to_image</span> (<span class="nu">NULL</span>, db, &amp;data, &amp;size) != <span class="nu">0</span>)
+    <span class="kw">return</span> <span class="nu">FALSE</span>;
+
+<span class="hl-line">  <span class="ty">gboolean</span> res = <span class="fn">frida_set_file_contents</span> (<span class="st">"/sys/fs/selinux/load"</span>, data, size, error);</span>
+  <span class="fn">free</span> (data);
+  <span class="kw">return</span> res;
+}</pre>
+      </div>
+
+      <!-- 4.5 -->
+      <h3 class="sub-header" id="code-fsetfilecon">4.5 最后一环：注入时在 <code>linjector.vala</code> 里给 <code>memfd</code> 盖上 <code>frida_memfd</code> 印章</h3>
+      <p>
+        前面四步已经在内核的《通行白名单手册》里写好了：“凡是盖有 <code>frida_memfd</code> 印章的内存文件和盖有 <code>frida_file</code> 印章的磁盘文件，所有 App（<code>domain</code>）都可以打开、读取、映射并执行。”
+      </p>
+      <p>
+        那么，<strong>印章是在哪一刻盖上去的呢？</strong>答案在 <code>src/linux/linjector.vala</code> 的末尾（<code>Lines 254-283</code>）：每当 <code>frida-server</code> 调用 <code>memfd_create</code> 把 <code>frida-agent.so</code> 写入匿名内存文件描述符后，会立刻调用 <code>adjust_fd_permissions(fd)</code>，通过系统调用 <code>fsetfilecon(fd, "u:object_r:frida_memfd:s0")</code>（底层即对 <code>fd</code> 对应的内核 inode 设置扩展属性 <code>security.selinux</code>）给它盖上专用印章！
+      </p>
+
+      <div class="code-panel">
+        <div class="code-topbar">
+          <span class="code-file">frida-core/src/linux/linjector.vala (Lines 254–283)</span>
+          <span class="code-meta">commit 075600d9 · 为 memfd 与临时文件打上 frida_memfd / frida_file 标签</span>
+        </div>
+        <pre class="code-body"><span class="kw">private</span> <span class="ty">MemoryFileDescriptor</span>? <span class="fn"> try_memfd_create</span> (<span class="ty">string</span> name, <span class="ty">Bytes</span> payload) {
+    <span class="kw">if</span> (!memfd_supported)
+        <span class="kw">return</span> <span class="nu">null</span>;
+    <span class="kw">try</span> {
+        <span class="kw">var</span> fd = <span class="ty">MemoryFileDescriptor</span>.<span class="fn">from_bytes</span> (name, payload);
+<span class="hl-line">        <span class="fn">adjust_fd_permissions</span> (fd); <span class="cm">// 创建 memfd 后立即盖章！</span></span>
+        <span class="kw">return</span> fd;
+    } <span class="kw">catch</span> (<span class="ty">SystemError</span> e) {
+        memfd_supported = <span class="nu">false</span>;
+        <span class="kw">return</span> <span class="nu">null</span>;
+    }
+}
+
+<span class="kw">private void</span> <span class="fn">adjust_directory_permissions</span> (<span class="ty">string</span> path) {
+    <span class="ty">FileUtils</span>.<span class="fn">chmod</span> (path, <span class="nu">0755</span>);
+<span class="cpp">#if ANDROID</span>
+    <span class="ty">SELinux</span>.<span class="fn">setfilecon</span> (path, <span class="st">"u:object_r:frida_file:s0"</span>);
+<span class="cpp">#endif</span>
+}
+
+<span class="kw">private void</span> <span class="fn">adjust_file_permissions</span> (<span class="ty">string</span> path) {
+    <span class="ty">FileUtils</span>.<span class="fn">chmod</span> (path, (path.<span class="fn">has_suffix</span> (<span class="st">".so"</span>)) ? <span class="nu">0755</span> : <span class="nu">0644</span>);
+<span class="cpp">#if ANDROID</span>
+<span class="hl-line">    <span class="ty">SELinux</span>.<span class="fn">setfilecon</span> (path, <span class="st">"u:object_r:frida_file:s0"</span>);</span>
+<span class="cpp">#endif</span>
+}
+
+<span class="kw">private void</span> <span class="fn">adjust_fd_permissions</span> (<span class="ty">FileDescriptor</span> fd) {
+<span class="cpp">#if ANDROID</span>
+<span class="hl-line">    <span class="ty">SELinux</span>.<span class="fn">fsetfilecon</span> (fd.handle, <span class="st">"u:object_r:frida_memfd:s0"</span>);</span>
+<span class="cpp">#endif</span>
+}</pre>
+      </div>
+    </section>
+
+    <!-- SECTION 05 -->
+    <section class="chapter" id="sec-05">
+      <div class="chapter-header">
+        <span class="chapter-num">05</span>
+        <h2>13 条 <code>frida_selinux_rules</code> 全量白话对照表（支持分类筛选）</h2>
+      </div>
+
+      <p>
+        为什么 Frida 不多不少刚好注入这 <strong>13 条</strong> SELinux 规则？每一条规则分别对应注入流程里的哪一个系统调用？如果删掉其中某一条，注入会在哪一步崩溃？点击下方分类按钮可快速筛选：
+      </p>
+
+      <div class="filter-bar">
+        <button class="filter-btn active" onclick="filterRules('all', this)">全部规则 (13)</button>
+        <button class="filter-btn" onclick="filterRules('mem', this)">内存分配与 SO 映射 (5)</button>
+        <button class="filter-btn" onclick="filterRules('ipc', this)">跨进程 FD / Socket / 信号 (4)</button>
+        <button class="filter-btn" onclick="filterRules('sys', this)">Zygote / 系统服务适配 (4)</button>
+      </div>
+
+      <div class="table-wrap">
+        <table id="rules-table">
+          <thead>
+            <tr>
+              <th style="width: 56px;">序号</th>
+              <th style="width: 145px;">分类</th>
+              <th style="width: 310px;">SELinux 规则 (patch.c:41-53)</th>
+              <th>对应的注入阶段与大白话解释（删掉它会发生什么？）</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr data-cat="mem">
+              <td><code>#01</code><br><span style="font-size:11px;color:var(--ink-3);">L41</span></td>
+              <td><span class="rule-cat-badge cat-mem">内存与代码映射</span></td>
+              <td><code>allow domain domain : process { execmem };</code></td>
+              <td>
+                <strong>允许所有进程分配并执行匿名 RWX 内存。</strong><br>
+                对应三处：① Stage 1 <code>ptrace</code> 在目标进程 <code>mmap(PROT_READ|PROT_WRITE|PROT_EXEC)</code> 放 <code>bootstrapper.bin</code> 和 <code>loader.bin</code>；② <code>frida-gum</code> 进行 Inline Hook（Interceptor）时动态生成的指令跳板（Trampoline）；③ V8 / QuickJS JIT 编译。若无此条，<code>mmap(RWX)</code> 或 <code>mprotect(RX)</code> 会直接报 <code>EACCES</code>。
+              </td>
+            </tr>
+            <tr data-cat="mem">
+              <td><code>#02</code><br><span style="font-size:11px;color:var(--ink-3);">L42</span></td>
+              <td><span class="rule-cat-badge cat-mem">内存与代码映射</span></td>
+              <td><code>allow domain frida_file : dir { search };</code></td>
+              <td>
+                <strong>允许目标进程穿越标签为 <code>frida_file</code> 的临时目录。</strong><br>
+                当设备内核老于 Linux 3.17 不支持 <code>memfd_create</code>（或进入降级磁盘模式）时，<code>frida-server</code> 会在临时目录下释放文件并调用 <code>adjust_directory_permissions()</code> 打上 <code>frida_file</code> 标签。目标 App 必须有 <code>dir { search }</code> 才能解析该目录下的文件路径。
+              </td>
+            </tr>
+            <tr data-cat="mem">
+              <td><code>#03</code><br><span style="font-size:11px;color:var(--ink-3);">L43</span></td>
+              <td><span class="rule-cat-badge cat-mem">内存与代码映射</span></td>
+              <td><code>allow domain frida_file : file { open read getattr execute ?map };</code></td>
+              <td>
+                <strong>允许目标进程加载并执行磁盘降级模式下的 <code>frida-agent.so</code>。</strong><br>
+                <code>dlopen()</code> 一个磁盘上的 <code>.so</code> 文件需要 sequentially 执行 <code>open</code>、<code>fstat(getattr)</code>、<code>read</code>（读 ELF 头）以及 <code>mmap(PROT_EXEC)</code>（触发 <code>execute</code> 和 Android 8+ 新增的 <code>?map</code> 权限）。
+              </td>
+            </tr>
+            <tr data-cat="mem">
+              <td><code>#04</code><br><span style="font-size:11px;color:var(--ink-3);">L44</span></td>
+              <td><span class="rule-cat-badge cat-mem">内存与代码映射</span></td>
+              <td><code>allow domain frida_memfd : file { open read write getattr execute ?map };</code></td>
+              <td>
+                <strong>允许目标进程通过 <code>/proc/self/fd/N</code> 映射并执行无文件内存中的 <code>frida-agent.so</code>（现代 Android 主路径）。</strong><br>
+                Stage 2 的 <code>loader.bin</code> 收到 <code>SCM_RIGHTS</code> 传来的 <code>memfd</code> 后，拼出路径 <code>/proc/self/fd/%d</code> 传给 <code>dlopen()</code>。内核在 <code>do_filp_open</code> 和 <code>mmap_region</code> 时会检查目标进程对 <code>u:object_r:frida_memfd:s0</code> 是否有 <code>open/read/getattr/execute/map</code> 权限。
+              </td>
+            </tr>
+            <tr data-cat="mem">
+              <td><code>#05</code><br><span style="font-size:11px;color:var(--ink-3);">L45</span></td>
+              <td><span class="rule-cat-badge cat-mem">内存与代码映射</span></td>
+              <td><code>allow domain shell_data_file : dir { search };</code></td>
+              <td>
+                <strong>允许目标进程穿越 <code>/data/local/tmp</code> 目录。</strong><br>
+                在 Android 系统中，<code>/data/local/tmp</code> 的默认 SELinux 标签就是 <code>u:object_r:shell_data_file:s0</code>。普通 <code>untrusted_app</code> 默认被禁止 <code>search</code> 这个目录；如果不加这条，即使把里面的子目录或 <code>.so</code> 改成 <code>frida_file</code>，App 在解析路径第一层 <code>/data/local/tmp/...</code> 时就会被内核挡回。
+              </td>
+            </tr>
+            <tr data-cat="sys">
+              <td><code>#06</code><br><span style="font-size:11px;color:var(--ink-3);">L46</span></td>
+              <td><span class="rule-cat-badge cat-sys">Zygote 与系统适配</span></td>
+              <td><code>allow domain zygote_exec : file { execute };</code></td>
+              <td>
+                <strong>允许进程执行 Zygote 可执行文件（<code>/system/bin/app_process64</code>）。</strong><br>
+                在处理基于脚本包装（<code>wrap.sh</code>）或特定早期 Spawn 孵化场景时，需要调用或映射标签为 <code>zygote_exec</code> 的二进制程序。
+              </td>
+            </tr>
+            <tr data-cat="ipc">
+              <td><code>#07</code><br><span style="font-size:11px;color:var(--ink-3);">L47</span></td>
+              <td><span class="rule-cat-badge cat-ipc">跨进程 FD 与 Socket</span></td>
+              <td><code>allow domain $self : process { sigchld };</code></td>
+              <td>
+                <strong>允许被 ptrace 附加或孵化的目标进程向 <code>frida-server</code>（<code>$self</code>）发送 <code>SIGCHLD</code> 信号。</strong><br>
+                在 Stage 1 的 <code>ptrace</code> 附加、单步调试与 <code>waitpid()</code> 握手期间，被追踪的目标进程（属 <code>domain</code>）状态变更时会向追踪者 <code>frida-server</code>（<code>$self</code>，如 <code>u:r:su:s0</code> 或 <code>u:r:magisk:s0</code>）发送子进程信号，SELinux 会在 <code>waitpid</code> 路径上检查 <code>process { sigchld }</code>。
+              </td>
+            </tr>
+            <tr data-cat="ipc">
+              <td><code>#08</code><br><span style="font-size:11px;color:var(--ink-3);">L48</span></td>
+              <td><span class="rule-cat-badge cat-ipc">跨进程 FD 与 Socket</span></td>
+              <td><code>allow domain $self : fd { use };</code></td>
+              <td>
+                <strong>允许目标进程使用由 <code>frida-server</code>（<code>$self</code>）创建并传递过来的文件描述符（<code>fd</code>）。</strong><br>
+                这是理解 SELinux 的一个关键点：在 SELinux 眼里，<strong>文件描述符（<code>struct file</code>）本身带有创建者进程的域标签（<code>$self</code>）</strong>，而文件背后的 inode 带有文件标签（<code>frida_memfd</code>）。当 <code>frida-server</code> 通过 <code>SCM_RIGHTS</code> 把 <code>memfd</code> 和 <code>socketpair</code> 的一端传给目标 App 时，内核 <code>scm_detach_fds()</code> 会首先检查目标 App 是否有权使用 <code>$self</code> 创建的 <code>fd { use }</code>！
+              </td>
+            </tr>
+            <tr data-cat="ipc">
+              <td><code>#09</code><br><span style="font-size:11px;color:var(--ink-3);">L49</span></td>
+              <td><span class="rule-cat-badge cat-ipc">跨进程 FD 与 Socket</span></td>
+              <td><code>allow domain $self : unix_stream_socket { connectto read write getattr getopt };</code></td>
+              <td>
+                <strong>允许目标进程连接并读写 <code>frida-server</code>（<code>$self</code>）的 Unix 域流式套接字。</strong><br>
+                直接服务于我们在第二篇详细讲过的两条通道：① Stage 1 <code>bootstrapper.bin</code> 调用 <code>connect()</code> 连接 <code>frida-server</code> 的抽象命名空间监听套接字（触发 <code>connectto</code>）；② Stage 2 <code>loader.bin</code> 与 <code>frida-agent.so</code> 读写通过 <code>SCM_RIGHTS</code> 传进来的 <code>socketpair</code> 端（<code>ctrlfd_for_peer</code>，触发 <code>read/write/getattr/getopt</code>）。
+              </td>
+            </tr>
+            <tr data-cat="ipc">
+              <td><code>#10</code><br><span style="font-size:11px;color:var(--ink-3);">L50</span></td>
+              <td><span class="rule-cat-badge cat-ipc">跨进程 FD 与 Socket</span></td>
+              <td><code>allow domain $self : tcp_socket { read write getattr getopt };</code></td>
+              <td>
+                <strong>允许目标进程读写由 <code>$self</code> 创建并传递的 TCP 套接字。</strong><br>
+                用于支持套接字移交或基于 TCP 的控制/调试通道在目标进程内的直接读写。
+              </td>
+            </tr>
+            <tr data-cat="sys">
+              <td><code>#11</code><br><span style="font-size:11px;color:var(--ink-3);">L51</span></td>
+              <td><span class="rule-cat-badge cat-sys">Zygote 与系统适配</span></td>
+              <td><code>allow zygote zygote : capability { sys_ptrace };</code></td>
+              <td>
+                <strong>赋予 <code>zygote</code> 进程在 SELinux 层面的 <code>CAP_SYS_PTRACE</code> 能力。</strong><br>
+                当 Frida Hook 了 <code>zygote64</code> 并在其内部观测或孵化子进程、检视进程状态时，避免因缺少 <code>sys_ptrace</code> capability 而被内核拦截。
+              </td>
+            </tr>
+            <tr data-cat="sys">
+              <td><code>#12</code><br><span style="font-size:11px;color:var(--ink-3);">L52</span></td>
+              <td><span class="rule-cat-badge cat-sys">Zygote 与系统适配</span></td>
+              <td><code>allow ?app_zygote zygote_exec : file { read };</code></td>
+              <td>
+                <strong>允许 Android 10+ 引入的次级孵化器 <code>app_zygote</code> 读取 <code>zygote_exec</code>。</strong><br>
+                像 Chrome 多进程渲染沙箱或 WebView 会使用应用专属的 <code>app_zygote</code> 域。注意前面的 <code>?</code> 号：在 Android 9 及更早没有 <code>app_zygote</code> 类型的系统上会自动静默跳过。
+              </td>
+            </tr>
+            <tr data-cat="sys">
+              <td><code>#13</code><br><span style="font-size:11px;color:var(--ink-3);">L53</span></td>
+              <td><span class="rule-cat-badge cat-sys">Zygote 与系统适配</span></td>
+              <td><code>allow system_server ?apex_art_data_file : file { execute };</code></td>
+              <td>
+                <strong>允许 <code>system_server</code> 执行位于 <code>/data/misc/apexdata/com.android.art</code> 下的 ART 编译缓存代码。</strong><br>
+                在 Android 10+ 的 APEX 模块化架构下，当 Frida 注入 <code>system_server</code> 并触发 Java 方法重编译 / 去优化（Deoptimization）或加载相关 ART 数据文件时，需要对该类型具备 <code>execute</code> 权限。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 06 -->
+    <section class="chapter" id="sec-06">
+      <div class="chapter-header">
+        <span class="chapter-num">06</span>
+        <h2>攻防视角：保持 <code>Enforcing=1</code> 就彻底无痕了吗？</h2>
+      </div>
+
+      <p>
+        既然 Frida 的 SELinux 热补丁如此精妙——既不改 <code>/sys/fs/selinux/enforce</code>，也不在磁盘上留下任何临时策略文件——那么<strong>站在高级反外挂 / RASP（运行时应用自我保护）风控团队的视角，还能不能检测出内核 SELinux 策略被 Frida 热修改过？如果自己魔改定制隐匿版 Frida，应该改哪里？</strong>
+      </p>
+
+      <div class="plain-board">
+        <div class="plain-board-header">
+          <div class="plain-board-title">🛡️ 蓝军（风控检测方）vs 红军（定制魔改方）核心交锋点</div>
+          <span class="plain-badge">实战对抗总结</span>
+        </div>
+        <div class="plain-vs-grid">
+          <div class="plain-vs-card bad">
+            <div class="plain-vs-head">
+              <span class="plain-vs-name">风控方如何抓出 patch.c 的痕迹？</span>
+              <span class="plain-vs-tag bad">3 种检测维度</span>
+            </div>
+            <ol style="font-size: 13.3px; margin-left: 18px; color: var(--ink-2); line-height: 1.65;">
+              <li style="margin-bottom: 8px;">
+                <strong>直接试探 <code>execmem</code> 权限（普通 App 即可执行）</strong>：<br>
+                在标准 Android ROM 的 SELinux 策略下，如果 App 的 <code>targetSdkVersion &gt;= 29</code>（Android 10+），<code>untrusted_app</code> 默认是<strong>没有 <code>process { execmem }</code> 权限</strong>的（尝试 <code>mmap(NULL, 4096, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)</code> 会被 SELinux 拦截返回 <code>EACCES</code>）。但只要 <code>frida-server</code> 启动并打过补丁，因为第 1 条规则是 <code>allow domain domain:process { execmem }</code>（把所有进程都放开了！），普通 App 突然发现自己居然能成功申请匿名 RWX 内存了！
+              </li>
+              <li style="margin-bottom: 8px;">
+                <strong>读取 <code>/sys/fs/selinux/policy</code> 检索特征字符串</strong>：<br>
+                在未封锁 <code>selinuxfs</code> 读取的机身或特权辅助服务下，直接扫描导出策略中的符号表，查找是否存在硬编码字符串 <code>frida_file</code> 或 <code>frida_memfd</code>。
+              </li>
+              <li>
+                <strong>观测 <code>/proc/self/maps</code> 或 <code>/proc/self/fd</code> 的 SELinux Context</strong>：<br>
+                对进程已映射的匿名内存 fd 调用 <code>fgetfilecon()</code> / <code>getxattr(..., "security.selinux")</code>，一旦读出 <code>u:object_r:frida_memfd:s0</code> 即可一锤定音。
+              </li>
+            </ol>
+          </div>
+
+          <div class="plain-vs-card good">
+            <div class="plain-vs-head">
+              <span class="plain-vs-name">深度定制/魔改 Frida 时如何抹除这些指纹？</span>
+              <span class="plain-vs-tag good">源码级去特征方案</span>
+            </div>
+            <ol style="font-size: 13.3px; margin-left: 18px; color: var(--ink-2); line-height: 1.65;">
+              <li style="margin-bottom: 8px;">
+                <strong>重命名或复用系统既有合法 Type（消掉 <code>frida_file</code> / <code>frida_memfd</code>）</strong>：<br>
+                在 <code>lib/selinux/patch.c:42-44, 85, 92</code> 和 <code>src/linux/linjector.vala:269, 276, 281</code> 中，不要使用显眼的 <code>"frida_file"</code> 和 <code>"frida_memfd"</code>。可以改用随机生成的系统风格名称，或者直接复用系统中已自带 <code>file_type</code> 与 <code>mlstrustedobject</code> 属性的既有合法类型。
+              </li>
+              <li style="margin-bottom: 8px;">
+                <strong>将 <code>domain</code> 收敛为按需针对性放行（修复 <code>execmem</code> 泛化漏洞）</strong>：<br>
+                官方 Frida 为了省事，在 <code>frida_selinux_rules[]</code> 里把 Source 全部写成了 <code>"domain"</code>（导致没被注入的检测 App 也能通过试探 <code>mmap(RWX)</code> 发现异常）。在定制版中，可以只对需要注入的目标域（或注入前按需打孔、甚至利用系统已具备权限的跳板）开放权限。
+              </li>
+              <li>
+                <strong>注入完成后卸载或还原规则</strong>：<br>
+                由于 <code>/sys/fs/selinux/load</code> 支持随时热更新，可以在修改前先把原始的 <code>/sys/fs/selinux/policy</code> 二进制流备份在内存中，待 Stage 2 <code>dlopen(memfd)</code> 完成且通信建立后，视业务需要裁剪不再需要的加载期规则。
+              </li>
+            </ol>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="sub-header">本专题涉及的 <code>frida-core @ 075600d9</code> 源码索引</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>源码文件路径</th>
+              <th>行号范围</th>
+              <th>核心函数 / 结构体</th>
+              <th>功能简述</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>lib/selinux/patch.c</code></td>
+              <td><code>L29–L54</code></td>
+              <td><code>FridaSelinuxRule</code>, <code>frida_selinux_rules[13]</code></td>
+              <td>定义 13 条核心 SELinux 规则（含 <code>?</code> 可选语法与 <code>$self</code> 占位符）。</td>
+            </tr>
+            <tr>
+              <td><code>lib/selinux/patch.c</code></td>
+              <td><code>L59–L174</code></td>
+              <td><code>frida_selinux_patch_policy()</code></td>
+              <td>热补丁主入口：串联加载、注册类型、写入规则、保存入核及模拟器 <code>shell</code> 域兜底。</td>
+            </tr>
+            <tr>
+              <td><code>lib/selinux/patch.c</code></td>
+              <td><code>L176–L213</code></td>
+              <td><code>frida_load_policy()</code>, <code>frida_save_policy()</code></td>
+              <td>读取 <code>/sys/fs/selinux/policy</code> 反序列化为 <code>policydb_t</code>，以及打包写回 <code>/sys/fs/selinux/load</code>。</td>
+            </tr>
+            <tr>
+              <td><code>lib/selinux/patch.c</code></td>
+              <td><code>L216–L320</code></td>
+              <td><code>frida_ensure_type()</code>, <code>frida_add_type_to_class_constraints_referencing_attribute()</code></td>
+              <td>在 <code>p_types</code> 动态注册新类型、扩容属性位图，并修补所有 Class 的 MLS Constraint 位图。</td>
+            </tr>
+            <tr>
+              <td><code>lib/selinux/patch.c</code></td>
+              <td><code>L323–L339</code></td>
+              <td><code>frida_ensure_permissive()</code></td>
+              <td>在 <code>db-&gt;permissive_map</code> 位图中将指定域（如模拟器下的 <code>shell</code>）设为单域宽容。</td>
+            </tr>
+            <tr>
+              <td><code>lib/selinux/patch.c</code></td>
+              <td><code>L342–L424</code></td>
+              <td><code>frida_ensure_rule()</code></td>
+              <td>调用 <code>getcon()</code> 解析 <code>$self</code>，查询类权限与公共权限表，并在 <code>db-&gt;te_avtab</code> 中按位或置位。</td>
+            </tr>
+            <tr>
+              <td><code>lib/selinux/patch.c</code></td>
+              <td><code>L429–L466</code></td>
+              <td><code>frida_set_file_contents()</code></td>
+              <td>绕过 <code>g_file_set_contents</code> 建临时文件的限制，直接 <code>open(O_RDWR)</code> + 循环 <code>write()</code> 写入 <code>selinuxfs</code>。</td>
+            </tr>
+            <tr>
+              <td><code>src/linux/linjector.vala</code></td>
+              <td><code>L66, L254–L283</code></td>
+              <td><code>adjust_fd_permissions()</code>, <code>adjust_file_permissions()</code>, <code>adjust_directory_permissions()</code></td>
+              <td>在创建 <code>memfd</code> 或释放临时文件时调用 <code>fsetfilecon</code> / <code>setfilecon</code> 打上 <code>frida_memfd</code> 与 <code>frida_file</code> 标签。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Series Navigation -->
+      <div class="callout blue" style="margin-top: 28px;">
+        <div class="callout-title">📚 Frida Android 原理深度拆解系列导航（基于 Frida 17.27.5）</div>
+        <p style="margin-bottom: 6px;">
+          • <strong>第一篇（Java Hook 原理）</strong>：<a href="frida-android-guide-v2.html" style="color: var(--blue); font-weight: 600;">《Frida 17.27.5 Android Java Hook 深度指南：从 ArtMethod 劫持到运行时去优化》</a>
+        </p>
+        <p style="margin-bottom: 6px;">
+          • <strong>第二篇（进程注入原理）</strong>：<a href="frida-inject-guide.html" style="color: var(--blue); font-weight: 600;">《Frida 17.27.5 是如何注入 Android App 的？— 从 ptrace 远程调用到 memfd 无文件加载》</a>
+        </p>
+        <p style="margin-bottom: 6px;">
+          • <strong>补充专题 A（SELinux 热补丁，本文）</strong>：<strong>《补充专题：Frida 如何在不关 Enforcing 的情况下热修改内核 SELinux 策略？》</strong>
+        </p>
+        <p style="margin-bottom: 0;">
+          • <strong>补充专题 B（RPC 通信协议）</strong>：<a href="frida-dbus-guide.html" style="color: var(--blue); font-weight: 600;">《补充专题：为什么 Frida 在 Android 上要用 D-Bus 通信？（GDBus / Socketpair 全链路拆解）》</a>
+        </p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+  // Interactive Surgery Simulator Data
+  var SURGERY_STAGES = [
+    {
+      title: "Step 1 · 读取 /sys/fs/selinux/policy 并反序列化为 policydb_t",
+      summary: "调用 g_file_get_contents(\"/sys/fs/selinux/policy\") 将内核当前生效的整份二进制策略流读入用户态内存缓冲区，随后初始化 libsepol 的 policydb_t 结构体并调用 policydb_read(&db, &file, FALSE) 完成反序列化。",
+      why: "内核的 selinuxfs 不提供“只追加一条规则”的增量接口，只支持“整包导出 (/sys/fs/selinux/policy)”和“整包原子替换 (/sys/fs/selinux/load)”。因此必须先把整张策略表完整还原成 C 结构体树。",
+      struct: "policydb_t db (p_types / p_classes / te_avtab / type_attr_map)",
+      lines: "lib/selinux/patch.c : Lines 65–83 & 176–200",
+      code: [
+        "/* lib/selinux/patch.c : Lines 71-83 */",
+        "gchar * policy_data;",
+        "gsize policy_size;",
+        "if (!g_file_get_contents (\"/sys/fs/selinux/policy\",",
+        "    &policy_data, &policy_size, NULL))",
+        "  return;",
+        "",
+        "policydb_t db;",
+        "frida_load_policy (policy_data, policy_size, &db, &error);",
+        "  ├─ policy_file_init (&file);",
+        "  ├─ file.type = PF_USE_MEMORY;",
+        "  ├─ file.data = data; file.len = size;",
+        "  ├─ policydb_init (db);",
+        "  ├─ policydb_read (db, &file, FALSE);   // 反序列化整棵策略树",
+        "  └─ policydb_load_isids (db, &sidtab);  // 加载初始 SID 表"
+      ]
+    },
+    {
+      title: "Step 2 · 动态注册 frida_file / frida_memfd 并修补编译期 MLS Constraint 位图",
+      summary: "在 db.p_types.table 符号表中新增 frida_file 和 frida_memfd 两个类型 (++db->p_types.nprim)，realloc 扩容 type_attr_map 与 attr_type_map 位图，为它们同时绑定 file_type 与 mlstrustedobject 属性，并遍历所有 Class 的 constraints 把新 type_id 补进 expr->names 位图。",
+      why: "Android 给每个 App 分配了独立的 MLS 类别（如 s0:c512,c768），而 frida-server 创建的 memfd 是 s0。如果不把 frida_memfd 补进所有引用了 mlstrustedobject 的编译期 Constraint 表达式位图 (expr->names)，跨 MLS 级别的 dlopen 会被内核直接拒绝！",
+      struct: "db.p_types.table + db.type_attr_map + klass->constraints->expr->names",
+      lines: "lib/selinux/patch.c : Lines 85–97 & 216–320",
+      code: [
+        "/* lib/selinux/patch.c : Lines 85-97 & 294-320 */",
+        "frida_ensure_type (&db, \"frida_file\",  \"file_type\", \"mlstrustedobject\", NULL);",
+        "frida_ensure_type (&db, \"frida_memfd\", \"file_type\", \"mlstrustedobject\", NULL);",
+        "",
+        "/* 关键修复：二进制策略里的 constraint 表达式早在编译 ROM 时",
+        "   就已经展开成静态位图 expr->names，必须手动补位！ */",
+        "for (class_index = 0; class_index != db->p_classes.nprim; class_index++) {",
+        "  class_datum_t * klass = db->class_val_to_struct[class_index];",
+        "  for (node = klass->constraints; node != NULL; node = node->next) {",
+        "    for (expr = node->expr; expr != NULL; expr = expr->next) {",
+        "      if (expr->expr_type == CEXPR_NAMES &&",
+        "          ebitmap_get_bit (&expr->type_names->types, attr_id - 1)) {",
+        "        ebitmap_set_bit (&expr->names, type_id - 1, 1); // 破除 MLS 隔离！",
+        "      }",
+        "    }",
+        "  }",
+        "}"
+      ]
+    },
+    {
+      title: "Step 3 · getcon() 动态解析 $self 并在 db.te_avtab 哈希表中置位 13 条规则",
+      summary: "遍历 frida_selinux_rules[13]：遇到 ? 前缀的可选类型/权限在旧内核上不存在时静默跳过；遇到 $self 时调用 getcon() 动态解析出 frida-server 自身域（如 su 或 magisk）；最后在 db.te_avtab 哈希表中查找或插入 {source, target, class, AVTAB_ALLOWED}，执行 av->data |= (1U << (perm - 1))。",
+      why: "不同 Root 方案下 frida-server 的 SELinux 上下文不同（Magisk 是 u:r:magisk:s0，SuperSU/内核 su 是 u:r:su:s0，ADB 调试是 u:r:shell:s0）。用 $self 动态解析才能保证目标 App 通过 SCM_RIGHTS 接收 fd 和连接 unix_stream_socket 时百分百匹配！",
+      struct: "db.te_avtab (avtab_key_t -> avtab_datum_t.data bitmask)",
+      lines: "lib/selinux/patch.c : Lines 99–145 & 342–424",
+      code: [
+        "/* lib/selinux/patch.c : Lines 359-422 */",
+        "if (target == NULL && strcmp (rule->target, \"$self\") == 0) {",
+        "  getcon (&self_context);                 // 如 \"u:r:magisk:s0\"",
+        "  tokens = g_strsplit (self_context, \":\", 4);",
+        "  target = hashtab_search (db->p_types.table, tokens[2]); // \"magisk\"",
+        "}",
+        "",
+        "uint32_t perm_bit = 1U << (perm->s.value - 1);",
+        "avtab_key_t key = {",
+        "  .source_type  = source->s.value,",
+        "  .target_type  = target->s.value,",
+        "  .target_class = klass->s.value,",
+        "  .specified    = AVTAB_ALLOWED,",
+        "};",
+        "avtab_datum_t * av = avtab_search (&db->te_avtab, &key);",
+        "if (av == NULL) { avtab_insert (&db->te_avtab, &key, &new_av); ... }",
+        "av->data |= perm_bit; // 按位或打开权限位！"
+      ]
+    },
+    {
+      title: "Step 4 · policydb_to_image 序列化并直接 write 进 /sys/fs/selinux/load",
+      summary: "调用 policydb_to_image(NULL, db, &data, &size) 将修改后的 policydb_t 重新序列化为内核二进制格式，直接 open(\"/sys/fs/selinux/load\", O_RDWR) 并循环 write() 触发内核原子替换策略表；若在模拟器中因 u:r:shell:s0 权限不足写失败，则毫秒级闪切 setenforce(0) -> 将 shell 加入 permissive_map -> 重写 load -> 立即恢复 setenforce(1)。",
+      why: "内核 selinuxfs 在收到对 /sys/fs/selinux/load 的完整 write() 后，会在内核态执行 sel_write_load() 原子切换策略并刷新 AVC 缓存，全程不需要落盘任何文件，且 /sys/fs/selinux/enforce 保持为 1。",
+      struct: "/sys/fs/selinux/load (内核 sel_write_load 原子热替换)",
+      lines: "lib/selinux/patch.c : Lines 147–168, 203–213 & 429–466",
+      code: [
+        "/* lib/selinux/patch.c : Lines 147-168 & 203-213 */",
+        "policydb_to_image (NULL, db, &data, &size);",
+        "res = frida_set_file_contents (\"/sys/fs/selinux/load\", data, size, &err);",
+        "",
+        "if (!res) {",
+        "  /* 模拟器 u:r:shell:s0 兜底：毫秒级闪切并立刻恢复 Enforcing=1 */",
+        "  if (security_getenforce () == 1 && security_setenforce (0) == 0) {",
+        "    if (frida_ensure_permissive (&db, \"shell\", &error))",
+        "      res = frida_save_policy (&db, &save_error);",
+        "    security_setenforce (1); // 立即恢复 Enforcing = 1！",
+        "  }",
+        "}",
+        "policydb_destroy (&db);"
+      ]
+    }
+  ];
+
+  function selectSurgeryStage(idx) {
+    for (var i = 0; i < 4; i++) {
+      var btn = document.getElementById('surg-btn-' + i);
+      var cell = document.getElementById('surg-cell-' + i);
+      if (btn) btn.className = (i === idx) ? 'sim-btn active' : 'sim-btn';
+      if (cell) cell.className = (i === idx) ? 'sim-stage-cell active' : 'sim-stage-cell';
+    }
+    var st = SURGERY_STAGES[idx];
+    var leftEl = document.getElementById('surg-left');
+    var rightEl = document.getElementById('surg-right');
+    if (leftEl) {
+      leftEl.innerHTML =
+        '<div style="font-family:\'Noto Serif SC\',serif;font-size:17.5px;font-weight:700;color:var(--ink);margin-bottom:10px;">' + st.title + '</div>' +
+        '<p style="font-size:14px;color:var(--ink-2);margin-bottom:12px;">' + st.summary + '</p>' +
+        '<div style="background:var(--amber-soft);border-left:3px solid var(--amber);padding:10px 14px;border-radius:0 6px 6px 0;font-size:13px;color:var(--ink-2);">' +
+          '<strong style="color:var(--amber);">为什么必须这么做？</strong><br>' + st.why +
+        '</div>' +
+        '<div class="sim-kv">' +
+          '<div class="sim-k">操作数据结构</div><div class="sim-v"><code>' + st.struct + '</code></div>' +
+          '<div class="sim-k">精确源码位置</div><div class="sim-v"><code>' + st.lines + '</code></div>' +
+        '</div>';
+    }
+    if (rightEl) {
+      rightEl.innerHTML = '<pre style="margin:0;white-space:pre-wrap;font-family:\'JetBrains Mono\',monospace;font-size:12.3px;line-height:1.65;color:#e8e6df;">' +
+        st.code.join('\n').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') +
+        '</pre>';
+    }
+  }
+
+  // Filter for 13 rules table
+  function filterRules(cat, btnEl) {
+    var btns = document.querySelectorAll('.filter-btn');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].className = 'filter-btn';
+    }
+    if (btnEl) btnEl.className = 'filter-btn active';
+
+    var rows = document.querySelectorAll('#rules-table tbody tr');
+    for (var j = 0; j < rows.length; j++) {
+      var rCat = rows[j].getAttribute('data-cat');
+      if (cat === 'all' || rCat === cat) {
+        rows[j].style.display = '';
+      } else {
+        rows[j].style.display = 'none';
+      }
+    }
+  }
+
+  // Initialize simulator
+  selectSurgeryStage(0);
+
+  // Scroll-spy for sidebar TOC
+  (function() {
+    var links = document.querySelectorAll('.toc-list a');
+    var sections = [];
+    for (var i = 0; i < links.length; i++) {
+      var href = links[i].getAttribute('href');
+      if (href && href.charAt(0) === '#') {
+        var target = document.getElementById(href.substring(1));
+        if (target) sections.push({ link: links[i], el: target });
+      }
+    }
+    window.addEventListener('scroll', function() {
+      var pos = window.scrollY + 120;
+      var current = sections[0];
+      for (var i = 0; i < sections.length; i++) {
+        if (sections[i].el.offsetTop <= pos) {
+          current = sections[i];
+        }
+      }
+      for (var j = 0; j < links.length; j++) {
+        links[j].classList.remove('active');
+      }
+      if (current) current.link.classList.add('active');
+    });
+  })();
+</script>
+
+</body>
+</html>

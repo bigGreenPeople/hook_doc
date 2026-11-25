@@ -1415,6 +1415,10 @@
             </table>
           </div>
 
+          <div class="callout teal" style="margin: 18px 0;">
+            <strong>延伸阅读 · 独立补充专题：</strong>想逐行看懂 <code>lib/selinux/patch.c</code>（全部 467 行）是如何用 <code>libsepol</code> 反序列化 <code>policydb_t</code>、修补编译期 <code>mlstrustedobject</code> 约束位图、解析 <code>$self</code> 并注入全部 13 条规则的，请阅读：<a href="frida-selinux-guide.html"><strong>《补充专题：Frida 如何在不关 Enforcing 的情况下热修改内核 SELinux 策略？》 →</strong></a>
+          </div>
+
           <figure class="source-excerpt">
             <div class="source-filebar">
               <strong><code>lib/selinux/patch.c</code> &amp; <code>src/linux/linjector.vala</code></strong>
@@ -1947,7 +1951,8 @@
               <ul class="index-list">
                 <li><a href="index.html">返回文档总索引（index.html）</a></li>
                 <li><a href="frida-android-guide-v2.html">第一篇：Frida Android 入门与源码仓库拆解（v17.27.5）</a></li>
-                <li><a href="frida-dbus-guide.html">补充专题：Frida 里的 D-Bus 到底是什么？</a></li>
+                <li><a href="frida-selinux-guide.html">补充专题 A：Frida 如何在不关 Enforcing 的情况下热修改内核 SELinux 策略？</a></li>
+                <li><a href="frida-dbus-guide.html">补充专题 B：Frida 里的 D-Bus 到底是什么？</a></li>
                 <li><a href="xposed-art-hook-principle.html">对照阅读：Xposed v89 源码解析：ART 方法 Hook 的完整流程</a></li>
               </ul>
             </div>
