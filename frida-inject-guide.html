@@ -1603,6 +1603,74 @@
             <p>② <strong>兜底冷路径（<code>ProcessCodeSwapScope</code>，L2417）</strong>：若目标与服务端不是同一份 <code>libc</code>，则冻结其他全部线程，借用目标进程某段可执行页临时覆盖写入 <code>bootstrapper</code>，让它自己发系统调用 <code>mmap</code> 申请 RWX 页后再原样恢复原代码页。</p>
           </div>
 
+          <!-- 新增：x0 寄存器的双重身份 + .bin 裸机器码内存排布图解 -->
+          <figure class="selinux-viz" aria-label="ARM64 x0 寄存器的双重身份与 RWX 内存双阶段原地复用排布图">
+            <div class="selinux-viz-head">
+              <strong>💡 核心拆解：为什么 RWX 内存地址要跟 <code>x0</code> 打两次交道？<code>.c</code> 又是怎么变成 <code>.bin</code> 放进去的？</strong>
+              <span class="pill teal">AAPCS64 调用规约 &amp; 裸机器码布局</span>
+            </div>
+            <div class="selinux-viz-body" style="display:grid;gap:16px;">
+              <!-- Part 1: x0 dual roles -->
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">
+                <div style="padding:14px 16px;border:1px solid var(--line);border-top:3px solid var(--blue);border-radius:9px;background:#f8fbff;">
+                  <div style="font:700 12px var(--mono);color:var(--blue);margin-bottom:4px;">第一次交道 · 跑完 remote_mmap() 停在 0x320 时</div>
+                  <div style="font-weight:700;font-size:15px;color:var(--ink);margin-bottom:6px;">① <code>x0</code> 是【函数返回值寄存器】（内核写，Frida 读）</div>
+                  <p style="margin:0;font-size:13.5px;color:var(--sub);line-height:1.65;">
+                    <code>frida-server</code> 调目标进程的 <code>mmap(NULL, size, RWX, ...)</code> 时，传的是 <code>NULL</code> 让内核随便挑一块空地。当目标线程在内核里开辟完内存返回、撞上 <code>LR = 0x320</code> 暂停时，按照 ARM64 规约，<strong><code>mmap</code> 的返回值（新开辟的 RWX 首地址 <code>allocation_base</code>）正好存放在 <code>x0</code> 里</strong>。<code>frida-server</code> 只有去读 <code>result_regs.x[0]</code>，才能知道这块内存分到了哪个地址！
+                  </p>
+                </div>
+                <div style="padding:14px 16px;border:1px solid var(--line);border-top:3px solid var(--teal);border-radius:9px;background:#f4fbf9;">
+                  <div style="font:700 12px var(--mono);color:var(--teal);margin-bottom:4px;">第二次交道 · 启动 frida_bootstrap(ctx) / frida_load(ctx) 前</div>
+                  <div style="font-weight:700;font-size:15px;color:var(--ink);margin-bottom:6px;">② <code>x0</code> 又是【第 1 个参数寄存器】（Frida 写，机器码读）</div>
+                  <p style="margin:0;font-size:13.5px;color:var(--sub);line-height:1.65;">
+                    拿到 <code>allocation_base</code> 后，<code>frida-server</code> 把这块内存<strong>前半截写机器码（<code>.bin</code>），后半截写上下文结构体（<code>ctx</code>）</strong>。你看 C 源码里的入口原型：<code>frida_bootstrap(FridaBootstrapContext * ctx)</code> 和 <code>frida_load(FridaLoaderContext * ctx)</code> 都接收一个指针参数 <code>ctx</code>。因为裸机器码没有任何全局变量定位能力，<strong><code>frida-server</code> 必须把后半截结构体的地址写进 <code>x0</code></strong>，机器码一运行读 <code>x0</code> 才能找到自己的配置和输出缓冲区！
+                  </p>
+                </div>
+              </div>
+
+              <!-- Part 2: Why .bin instead of .so and how RWX memory is laid out -->
+              <div style="padding:14px 16px;border:1px solid var(--line);border-radius:9px;background:#fffdf9;">
+                <div style="font-weight:700;font-size:14.5px;color:var(--ink);margin-bottom:6px;">
+                  🔧 为什么叫 <code>bootstrapper.bin</code> / <code>loader.bin</code> 而不是 <code>.so</code>？因为此时还不能调 <code>dlopen</code>！
+                </div>
+                <p style="margin:0 0 12px;font-size:13.5px;color:var(--sub);line-height:1.65;">
+                  在注入刚开始时，我们还不知道目标进程里的 <code>dlopen</code> 在哪，所以没法加载带 ELF 头部的 <code>.so</code>。Frida 在编译期（<code>src/linux/helpers/meson.build</code>）先用 <code>-fPIC</code> 把 <code>bootstrapper.c</code> 和 <code>loader.c</code> 编译成位置无关代码，<strong>用链接脚本强制让入口函数 <code>frida_bootstrap</code> 和 <code>frida_load</code> 排在代码段（<code>.text</code>）的第 0 个字节（Offset <code>0x0</code>）</strong>，再用 <code>objcopy -O binary</code> 把 ELF 壳彻底剥掉，抽成两段纯 CPU 指令字节流打包进 <code>frida-server</code>。因此，<strong>把 <code>.bin</code> 写进 <code>allocation_base</code> 后，<code>allocation_base + 0x0</code> 就是入口函数的第一条指令！</strong>而且阶段一跑完后，阶段二会<strong>原地覆盖复用同一块 RWX 内存</strong>：
+                </p>
+
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;font:12.5px/1.6 var(--mono);">
+                  <div style="padding:12px 14px;border-radius:8px;background:var(--code-bg);color:var(--code-ink);">
+                    <div style="color:#7cc4ff;font-weight:700;margin-bottom:6px;">【阶段一 Step 4】allocation_base (如 0x7f8a000000)</div>
+                    <div style="padding:7px 9px;border-left:3px solid #f5b971;background:#1a2940;margin-bottom:6px;">
+                      <strong style="color:#f5b971;">+0x0000 [前半截：bootstrapper-arm64.bin]</strong><br>
+                      <code>PC 寄存器 ──► frida_bootstrap(ctx) 第 1 条指令</code><br>
+                      <span style="color:#9fb6d1;font-size:11.5px;">解析 /proc/self/auxv、搜 17 个符号、建 socketpair</span>
+                    </div>
+                    <div style="padding:7px 9px;border-left:3px solid #6ee7b7;background:#162c2b;">
+                      <strong style="color:#6ee7b7;">+code_size [后半截：FridaBootstrapContext]</strong><br>
+                      <code>x0 寄存器 ──► &amp;bootstrap_ctx (第 1 个参数 ctx)</code><br>
+                      <span style="color:#9fb6d1;font-size:11.5px;">含 allocation_base / page_size / ctrlfds[2] / FridaLibcApi*</span>
+                    </div>
+                  </div>
+
+                  <div style="padding:12px 14px;border-radius:8px;background:var(--code-bg);color:var(--code-ink);">
+                    <div style="color:#c4b5fd;font-weight:700;margin-bottom:6px;">【阶段二 Step 5-6】原地覆盖复用同一块 0x7f8a000000</div>
+                    <div style="padding:7px 9px;border-left:3px solid #f5b971;background:#1a2940;margin-bottom:6px;">
+                      <strong style="color:#f5b971;">+0x0000 [前半截覆盖为：loader-arm64.bin]</strong><br>
+                      <code>PC 寄存器 ──► frida_load(ctx) 第 1 条指令</code><br>
+                      <span style="color:#9fb6d1;font-size:11.5px;">只调一行 pthread_create(frida_main) 即返回 0x320！</span>
+                    </div>
+                    <div style="padding:7px 9px;border-left:3px solid #6ee7b7;background:#162c2b;">
+                      <strong style="color:#6ee7b7;">+code_size [后半截覆盖为：FridaLoaderContext]</strong><br>
+                      <code>x0 寄存器 ──► &amp;loader_ctx (第 1 个参数 ctx)</code><br>
+                      <span style="color:#9fb6d1;font-size:11.5px;">含 ctrlfds[1] / agent_mapped=1 / 刚解析好的 FridaLibcApi</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <figcaption class="selinux-viz-foot">一句话总结：<code>mmap</code> 结束时读 <code>x0</code> 是为了<strong>拿回新内存地址</strong>；调 <code>frida_bootstrap</code> / <code>frida_load</code> 前写 <code>x0</code> 是为了<strong>把上下文结构体指针 <code>ctx</code> 作为第 1 个参数传给裸机器码</strong>。</figcaption>
+          </figure>
+
           <!-- 3.3 -->
           <h3 id="s-bootstrap">3.3 阶段一 <code>bootstrapper.c</code>：无 libc 探测符号并建匿名 <code>ctrlfds</code></h3>
           <p>拿到 <code>allocation_base</code> 后，<code>frida-server</code> 写入预编译的无 libc 载荷 <code>bootstrapper-arm64.bin</code> 并用 <code>RemoteCall</code> 执行 <code>frida_bootstrap(ctx)</code>：</p>
