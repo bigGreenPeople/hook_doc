@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Android Security Notes · Hook 源码与原理文档索引</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --paper: #ffffff;
+      --ink: #162338;
+      --sub: #4c5e77;
+      --muted: #6c7d96;
+      --line: #d7e0ec;
+      --blue: #224b94;
+      --blue-strong: #173670;
+      --blue-soft: #e9f0fd;
+      --teal: #0e6b5c;
+      --teal-soft: #e7f6f2;
+      --amber: #b45318;
+      --amber-soft: #fff2e8;
+      --mono: "Cascadia Code", Consolas, ui-monospace, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.7 var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    :focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+
+    .wrap {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 44px 24px 72px;
+    }
+
+    header {
+      padding-bottom: 28px;
+      border-bottom: 1px solid var(--line);
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 22px;
+    }
+    .brand {
+      font: 700 12px/1.4 var(--mono);
+      letter-spacing: 0.12em;
+      color: var(--blue);
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 11px;
+      border: 1px solid #c6e2da;
+      border-radius: 999px;
+      background: var(--teal-soft);
+      color: var(--teal);
+      font: 600 12px/1.4 var(--mono);
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--teal);
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(28px, 4vw, 40px);
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+    }
+    .lead {
+      margin: 0;
+      max-width: 720px;
+      color: var(--sub);
+      font-size: 16.5px;
+    }
+
+    section {
+      margin-top: 38px;
+    }
+    .section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .section-head h2 {
+      margin: 0;
+      font-size: 21px;
+      line-height: 1.35;
+    }
+    .section-kicker {
+      font: 700 12px var(--mono);
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .card {
+      display: flex;
+      flex-direction: column;
+      padding: 20px 22px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--paper);
+      transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+    }
+    .card:hover {
+      border-color: var(--blue);
+      box-shadow: 0 6px 20px rgba(22, 35, 56, 0.07);
+      transform: translateY(-1px);
+    }
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font: 700 11.5px/1.5 var(--mono);
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+    .tag.teal { background: var(--teal-soft); color: var(--teal); }
+    .tag.amber { background: var(--amber-soft); color: var(--amber); }
+    .tag.muted { background: #edf1f7; color: var(--sub); }
+
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 17.5px;
+      line-height: 1.4;
+      color: var(--ink);
+    }
+    .card:hover h3 { color: var(--blue-strong); }
+    .card p {
+      margin: 0 0 14px;
+      font-size: 14px;
+      line-height: 1.65;
+      color: var(--sub);
+    }
+    .card-foot {
+      margin-top: auto;
+      padding-top: 10px;
+      border-top: 1px solid #ecf0f6;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font: 600 12.5px var(--mono);
+      color: var(--blue);
+    }
+    .card-foot .file {
+      color: var(--muted);
+      font-weight: 500;
+      overflow-wrap: anywhere;
+    }
+
+    footer {
+      margin-top: 48px;
+      padding-top: 20px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 720px) {
+      .wrap { padding: 28px 16px 52px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="topbar">
+        <div class="brand">ANDROID SECURITY / FIELD NOTES</div>
+        <div class="status"><span class="dot"></span> Hosted on instabox-vps</div>
+      </div>
+      <h1>Android Hook 源码与原理文档索引</h1>
+      <p class="lead">收录 Frida Android 源码架构与调用链、D-Bus 通信专题，以及经典 Xposed v89 ART 方法 Hook 逐行源码解析与交互动画。</p>
+    </header>
+
+    <section aria-labelledby="frida-heading">
+      <div class="section-head">
+        <h2 id="frida-heading">Frida Android 专题</h2>
+        <span class="section-kicker">FRIDA 17.27.5 · 源码与工作原理</span>
+      </div>
+      <div class="grid">
+        <a class="card" href="frida-android-guide-v2.html">
+          <div class="tags">
+            <span class="tag teal">第一篇</span>
+            <span class="tag">源码仓库拆解</span>
+          </div>
+          <h3>Frida Android 入门与源码仓库拆解</h3>
+          <p>基于 Frida 17.27.5 + frida-java-bridge v7.1.0，从第一个 Java Hook 入手，拆解各子项目的语言、编译产物、静态链接去向及三进程落位。</p>
+          <div class="card-foot"><span class="file">frida-android-guide-v2.html</span><span>阅读 →</span></div>
+        </a>
+
+        <a class="card" href="frida-inject-guide.html">
+          <div class="tags">
+            <span class="tag teal">第二篇</span>
+            <span class="tag">自映射 Mapper &amp; Zymbiote</span>
+          </div>
+          <h3>frida-server 如何把 frida-agent.so 注入目标 App？</h3>
+          <p>逐行拆解 Frida 17.27.5（frida-core @ 075600d9）：PTRACE_SEIZE + LR=0x320、默认 HAVE_MAPPER 自映射绕过 linker、memfd 传 FD 与 Zymbiote 冷启动。</p>
+          <div class="card-foot"><span class="file">frida-inject-guide.html</span><span>阅读 →</span></div>
+        </a>
+
+        <a class="card" href="frida-selinux-guide.html">
+          <div class="tags">
+            <span class="tag amber">补充专题 A</span>
+            <span class="tag">SELinux 热补丁</span>
+          </div>
+          <h3>Frida 如何在不关 Enforcing 的情况下热修改内核 SELinux 策略？</h3>
+          <p>逐行拆解 frida-core @ 075600d9 的 lib/selinux/patch.c（467 行）：libsepol 内存手术、mlstrustedobject 位图修补、13 条白名单规则与攻防检测。</p>
+          <div class="card-foot"><span class="file">frida-selinux-guide.html</span><span>阅读 →</span></div>
+        </a>
+
+        <a class="card" href="frida-dbus-guide.html">
+          <div class="tags">
+            <span class="tag amber">补充专题 B</span>
+            <span class="tag">跨机协议</span>
+          </div>
+          <h3>Frida 里的 D-Bus 到底是什么？</h3>
+          <p>深入解释 Frida 为何以及如何在 ADB/USB 传输层之上使用 D-Bus 协议完成电脑端、frida-server 与目标 App 内 agent 的会话通信。</p>
+          <div class="card-foot"><span class="file">frida-dbus-guide.html</span><span>阅读 →</span></div>
+        </a>
+      </div>
+    </section>
+
+    <section aria-labelledby="xposed-heading">
+      <div class="section-head">
+        <h2 id="xposed-heading">Xposed v89 / ART 专题</h2>
+        <span class="section-kicker">ANDROID 7.1.2 (API 25) · V89-SDK25</span>
+      </div>
+      <div class="grid">
+        <a class="card" href="xposed-art-hook-principle.html">
+          <div class="tags">
+            <span class="tag teal">完整长文</span>
+            <span class="tag">逐行源码</span>
+          </div>
+          <h3>Xposed v89 源码解析：ART 方法 Hook 的完整流程</h3>
+          <p>沿着安装、Zygote 初始化、Java 回调经 JNI 改写 ArtMethod，再到一次调用命中代理、执行 before/原方法/after 并返回的完整源码精读。</p>
+          <div class="card-foot"><span class="file">xposed-art-hook-principle.html</span><span>阅读 →</span></div>
+        </a>
+
+        <a class="card" href="xposed-art-animation.html">
+          <div class="tags">
+            <span class="tag">三段交互动画</span>
+          </div>
+          <h3>ART 方法调用与 Xposed Hook · 三段动画</h3>
+          <p>可独立播放与单步切换的可视化演示：1. 正常执行进入 ART；2. 安装 Hook 的字段改写；3. 注册后执行（含提前返回分支）。</p>
+          <div class="card-foot"><span class="file">xposed-art-animation.html</span><span>打开动画 →</span></div>
+        </a>
+      </div>
+    </section>
+
+    <footer>
+      <span>Android Security Field Notes · hook_doc</span>
+      <span>Hosted via InstaBox Port 3000</span>
+    </footer>
+  </div>
+</body>
+</html>
