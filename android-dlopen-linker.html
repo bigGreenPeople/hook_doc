@@ -715,16 +715,18 @@
       margin-top: 2px;
     }
     .step-btn[aria-current="step"] .subline { color: var(--blue-strong); }
-    .step-token {
+    .step-list > li.step-token {
       position: absolute;
       left: 0;
       top: 0;
+      margin: 0;
       width: 12px;
       height: 12px;
       border-radius: 50%;
       background: var(--blue);
       box-shadow: 0 0 0 4px #cfe0fd;
       pointer-events: none;
+      z-index: 2;
     }
     .step-token.moving { transition: transform 0.45s cubic-bezier(0.22, 0.72, 0.24, 1); }
 
