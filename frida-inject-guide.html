@@ -1907,6 +1907,10 @@
                   老版本写的是 <code>/proc/self/fd/%d</code>。但在 17.27.5 的 <code>loader.c:136</code> 中改成了带明确进程号的 <strong><code>/proc/%d/fd/%d</code>（通过 <code>frida_getpid()</code> 填入）</strong>！源码注释道破天机：当目标 App 同时挂着 gdb/lldb 调试器时，调试器收到 linker 的库加载通知后会从外部去读这个路径；如果写成 <code>/proc/self</code>，调试器会误读成<strong>调试器自己进程的 FD 表</strong>而卡死在 <code>dlopen()</code> 里，换成明确 PID 就能内外一致。
                 </p>
               </div>
+
+              <div style="padding:10px 14px;border:1px dashed #a9bedd;border-radius:8px;background:#f9fbff;font-size:13.2px;color:var(--sub);">
+                <strong>前置延伸阅读：</strong>想先彻底搞懂系统 <code>dlopen()</code> 怎么把磁盘 ELF 映射成内存段、算重定位并填进 <code>soinfo</code> 账本？可点开独立专题：<a href="android-dlopen-linker.html"><strong>《补充专题 C：Android dlopen 是如何加载并链接一个 .so 的？》↗</strong></a>
+              </div>
             </div>
           </figure>
 
@@ -2254,6 +2258,7 @@
                 <li><a href="frida-android-guide-v2.html">第一篇：Frida Android 入门与源码仓库拆解（v17.27.5）</a></li>
                 <li><a href="frida-selinux-guide.html">补充专题 A：Frida 如何在不关 Enforcing 的情况下热修改内核 SELinux 策略？</a></li>
                 <li><a href="frida-dbus-guide.html">补充专题 B：Frida 里的 D-Bus 到底是什么？</a></li>
+                <li><a href="android-dlopen-linker.html">补充专题 C：Android dlopen 是如何加载并链接一个 .so 的？（ELF 双视图与 bionic/linker）</a></li>
                 <li><a href="xposed-art-hook-principle.html">对照阅读：Xposed v89 源码解析：ART 方法 Hook 的完整流程</a></li>
               </ul>
             </div>

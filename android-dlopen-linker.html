@@ -1,0 +1,1910 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Android dlopen 是如何加载并链接一个 .so 的？｜ELF 双视图与 bionic/linker 全流程</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --paper: #ffffff;
+      --sidebar-bg: #eef2f8;
+      --ink: #162338;
+      --sub: #4b5d75;
+      --muted: #687a93;
+      --line: #d6e0ec;
+      --line-soft: #e6ecf5;
+      --blue: #224b94;
+      --blue-strong: #193975;
+      --blue-soft: #e9f0fd;
+      --teal: #0e6b5c;
+      --teal-soft: #e7f6f2;
+      --amber: #b45318;
+      --amber-soft: #fff2e8;
+      --violet: #5b3b9c;
+      --violet-soft: #f2ecfe;
+      --red: #a61e1e;
+      --red-soft: #fdecec;
+      --code-bg: #111e30;
+      --code-bar: #1a2c44;
+      --code-ink: #eaf1fb;
+      --mono: "Cascadia Code", Consolas, ui-monospace, SFMono-Regular, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.78 var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+    ::selection { background: #c8defe; color: #102138; }
+    a { color: var(--blue); text-underline-offset: 3px; }
+    a:hover { color: var(--blue-strong); }
+    code, pre { font-family: var(--mono); }
+    code {
+      font-size: 0.88em;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #edf2fa;
+      color: #163055;
+      overflow-wrap: anywhere;
+    }
+    pre code { padding: 0; background: transparent; color: inherit; font-size: inherit; }
+    :focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+
+    /* Shell */
+    .shell {
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+      max-width: 1400px;
+      margin: 0 auto;
+      min-height: 100vh;
+    }
+    .sidebar {
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--line);
+    }
+    .side-inner {
+      position: sticky;
+      top: 0;
+      max-height: 100vh;
+      overflow: auto;
+      padding: 28px 16px 28px 22px;
+    }
+    .brand {
+      font: 700 11.5px/1.4 var(--mono);
+      letter-spacing: 0.1em;
+      color: var(--blue);
+      margin: 0 0 12px;
+    }
+    .back-home {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0 0 18px;
+      padding: 5px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--sub);
+      font-size: 12.5px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .back-home:hover { border-color: var(--blue); color: var(--blue-strong); }
+    .side-title {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 0 0 10px;
+      padding-left: 10px;
+    }
+    .toc { display: grid; gap: 3px; }
+    .toc a {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      padding: 7px 10px 7px 12px;
+      border-left: 3px solid transparent;
+      border-radius: 0 6px 6px 0;
+      color: #3a4c66;
+      font-size: 14px;
+      line-height: 1.45;
+      text-decoration: none;
+    }
+    .toc a.sub {
+      padding: 4px 10px 4px 30px;
+      font-size: 12.8px;
+      color: var(--muted);
+    }
+    .toc a .num { font: 700 11px var(--mono); color: var(--muted); min-width: 18px; }
+    .toc a:hover { background: #e1e9f6; color: var(--ink); }
+    .toc a.active {
+      border-left-color: var(--blue);
+      background: var(--blue-soft);
+      color: var(--blue-strong);
+      font-weight: 700;
+    }
+    .toc a.active .num { color: var(--blue); }
+    .side-foot {
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      font-size: 12px;
+      line-height: 1.65;
+      color: var(--muted);
+    }
+
+    /* Main */
+    .main { min-width: 0; padding: 0 52px 96px; }
+    .content { max-width: 960px; margin: 0 auto; }
+
+    /* Hero */
+    .hero {
+      padding: 50px 0 34px;
+      border-bottom: 1px solid var(--line);
+    }
+    .scope-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font: 700 12px/1.3 var(--mono);
+      background: var(--blue-soft);
+      color: var(--blue-strong);
+    }
+    .badge.teal { background: var(--teal-soft); color: var(--teal); }
+    .badge.amber { background: var(--amber-soft); color: var(--amber); }
+    .hero h1 {
+      margin: 0 0 14px;
+      font-size: clamp(28px, 4.1vw, 42px);
+      line-height: 1.22;
+      letter-spacing: -0.025em;
+    }
+    .hero-lead {
+      margin: 0 0 22px;
+      max-width: 78ch;
+      font-size: 17px;
+      line-height: 1.75;
+      color: var(--sub);
+    }
+    .roadmap {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .roadmap a {
+      display: block;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--paper);
+      text-decoration: none;
+      color: var(--ink);
+      transition: border-color 0.15s, transform 0.15s;
+    }
+    .roadmap a:hover { border-color: var(--blue); transform: translateY(-1px); }
+    .roadmap .r-step { display: block; font: 700 11px var(--mono); color: var(--blue); margin-bottom: 4px; }
+    .roadmap strong { display: block; font-size: 14.2px; line-height: 1.35; margin-bottom: 4px; }
+    .roadmap span { display: block; font-size: 12.5px; line-height: 1.45; color: var(--sub); }
+
+    /* Chapters */
+    .chapter {
+      padding: 46px 0 48px;
+      border-bottom: 1px solid var(--line);
+      scroll-margin-top: 22px;
+    }
+    .chapter:last-child { border-bottom: 0; }
+    .chapter-kicker {
+      margin: 0 0 6px;
+      font: 700 12px/1.4 var(--mono);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--blue);
+    }
+    .chapter h2 {
+      margin: 0 0 14px;
+      font-size: 27px;
+      line-height: 1.3;
+      letter-spacing: -0.018em;
+    }
+    .chapter h3 {
+      margin: 28px 0 10px;
+      font-size: 19px;
+      line-height: 1.4;
+      scroll-margin-top: 22px;
+    }
+    .chapter p { margin: 0 0 14px; }
+    .chapter ul, .chapter ol { margin: 0 0 16px; padding-left: 1.35em; }
+    .chapter li + li { margin-top: 6px; }
+    .lead { font-size: 16.8px; color: var(--sub); margin-bottom: 18px; }
+    .muted { color: var(--muted); font-size: 14px; }
+
+    /* Callouts */
+    .callout {
+      margin: 20px 0;
+      padding: 15px 18px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--blue);
+      border-radius: 8px;
+      background: var(--blue-soft);
+      font-size: 14.5px;
+      line-height: 1.72;
+    }
+    .callout p { margin: 0; }
+    .callout p + p { margin-top: 8px; }
+    .callout.teal { border-left-color: var(--teal); background: var(--teal-soft); }
+    .callout.amber { border-left-color: var(--amber); background: var(--amber-soft); }
+    .callout.violet { border-left-color: var(--violet); background: var(--violet-soft); }
+
+    /* Tables */
+    .table-wrap {
+      margin: 16px 0 22px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow-x: auto;
+      background: var(--paper);
+    }
+    table.data {
+      width: 100%;
+      min-width: 660px;
+      border-collapse: collapse;
+      font-size: 13.8px;
+      text-align: left;
+    }
+    table.data th, table.data td {
+      padding: 11px 13px;
+      border-bottom: 1px solid var(--line-soft);
+      vertical-align: top;
+      line-height: 1.62;
+    }
+    table.data thead th { background: #edf3fb; font-weight: 700; color: var(--ink); }
+    table.data tbody th { font-weight: 700; color: var(--ink); }
+    table.data tbody tr:last-child th, table.data tbody tr:last-child td { border-bottom: 0; }
+
+    /* Grid cards */
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin: 18px 0 22px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin: 18px 0 22px;
+    }
+    .mini-card {
+      padding: 15px 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--paper);
+    }
+    .mini-card .kicker {
+      display: inline-block;
+      font: 700 11px var(--mono);
+      color: var(--blue);
+      margin-bottom: 5px;
+    }
+    .mini-card h4 { margin: 0 0 6px; font-size: 15.2px; }
+    .mini-card p { margin: 0; font-size: 13.6px; color: var(--sub); line-height: 1.62; }
+
+    /* Visual panels */
+    .viz-box {
+      margin: 20px 0 24px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--paper);
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(22, 35, 56, 0.04);
+    }
+    .viz-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 16px;
+      background: #f5f8fd;
+      border-bottom: 1px solid var(--line);
+    }
+    .viz-head strong { font-size: 14.8px; color: var(--ink); }
+    .viz-body { padding: 18px; }
+    .viz-foot {
+      margin: 0;
+      padding: 10px 16px;
+      border-top: 1px solid var(--line-soft);
+      background: #fafcfe;
+      font-size: 13.2px;
+      color: var(--sub);
+    }
+
+    /* Compile -> dlopen Pipeline */
+    .elf-anatomy {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .elf-book {
+      display: grid;
+      gap: 8px;
+    }
+    .book-part {
+      padding: 11px 13px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--blue);
+      border-radius: 8px;
+      background: #f9fbff;
+      font-size: 13.2px;
+      line-height: 1.58;
+    }
+    .book-part.p-phdr { border-left-color: var(--teal); background: #f3fbf8; }
+    .book-part.p-body { border-left-color: var(--amber); background: #fffaf4; }
+    .book-part.p-shdr { border-left-color: var(--red); background: #fff6f6; border-style: dashed; border-left-style: solid; }
+    .book-part-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+      margin-bottom: 3px;
+    }
+    .book-part-head b { font-size: 14px; color: var(--ink); }
+    .book-part-head span { font: 700 11px var(--mono); color: var(--muted); }
+    .book-part p { margin: 0; color: var(--sub); }
+
+    .handoff-pipe {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr) 24px minmax(0, 1fr);
+      gap: 6px;
+      align-items: stretch;
+    }
+    .h-node {
+      padding: 13px 14px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #f9fbff;
+      font-size: 13.3px;
+      line-height: 1.58;
+    }
+    .h-node.mid { border-color: #f0caa9; background: #fffaf5; }
+    .h-node.run { border-color: #9ed7ca; background: var(--teal-soft); }
+    .h-node .tag {
+      display: inline-block;
+      font: 700 11px var(--mono);
+      color: var(--blue);
+      margin-bottom: 4px;
+    }
+    .h-node.mid .tag { color: var(--amber); }
+    .h-node.run .tag { color: var(--teal); }
+    .h-node b { display: block; font-size: 14.5px; margin-bottom: 4px; }
+    .h-node span { display: block; color: var(--sub); }
+    .h-arr {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font: 700 18px var(--mono);
+      color: var(--blue);
+    }
+
+    /* ELF Dual-View Diagram (Disk vs Memory) */
+    .elf-dual {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 56px minmax(0, 1.15fr);
+      gap: 10px;
+      align-items: stretch;
+    }
+    .elf-col {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fbfcfe;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .elf-col-head {
+      padding: 10px 13px;
+      background: #edf3fb;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .elf-col.mem .elf-col-head { background: #eaf6f2; }
+    .elf-col-head strong { font-size: 14px; }
+    .elf-col-head span {
+      font: 700 11px var(--mono);
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--sub);
+    }
+    .elf-blocks {
+      padding: 12px;
+      display: grid;
+      gap: 6px;
+      flex: 1;
+    }
+    .elf-blk {
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--blue);
+      border-radius: 6px;
+      background: #fff;
+      font-size: 12.6px;
+      line-height: 1.5;
+    }
+    .elf-blk.seg-r { border-left-color: var(--blue); background: #f8fbff; }
+    .elf-blk.seg-rx { border-left-color: var(--teal); background: #f3fbf8; }
+    .elf-blk.seg-relro { border-left-color: var(--violet); background: #f8f5ff; }
+    .elf-blk.seg-rw { border-left-color: var(--amber); background: #fffaf4; }
+    .elf-blk.seg-bss {
+      border: 1.5px dashed var(--amber);
+      border-left: 4px solid var(--amber);
+      background: var(--amber-soft);
+    }
+    .elf-blk.seg-gap {
+      border: 1px dashed #b9c8dc;
+      border-left: 4px solid #b9c8dc;
+      background: #f2f5fa;
+      color: var(--muted);
+      padding: 5px 10px;
+      font-size: 12px;
+    }
+    .elf-blk.seg-shdr {
+      border: 1px dashed #c89b9b;
+      border-left: 4px solid var(--red);
+      background: var(--red-soft);
+    }
+    .elf-blk-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+      margin-bottom: 2px;
+    }
+    .elf-blk-top b { font-size: 13px; color: var(--ink); }
+    .elf-addr {
+      font: 700 11.5px var(--mono);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .elf-perm {
+      display: inline-block;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font: 700 10.5px var(--mono);
+      background: #e9f0fd;
+      color: var(--blue-strong);
+      margin-right: 4px;
+    }
+    .elf-blk.seg-rx .elf-perm { background: var(--teal-soft); color: var(--teal); }
+    .elf-blk.seg-relro .elf-perm { background: var(--violet-soft); color: var(--violet); }
+    .elf-blk.seg-rw .elf-perm, .elf-blk.seg-bss .elf-perm { background: var(--amber-soft); color: var(--amber); }
+    .elf-blk.seg-shdr .elf-perm { background: #fad7d7; color: var(--red); }
+
+    .elf-mid {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-around;
+      align-items: center;
+      padding: 36px 0 14px;
+      text-align: center;
+      font: 700 11.5px var(--mono);
+      color: var(--blue);
+    }
+    .elf-mid .m-arrow {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+    .elf-mid .m-arrow big { font-size: 18px; line-height: 1; }
+    .elf-mid .m-arrow.drop { color: var(--red); }
+
+    .formula-bar {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .formula-pill {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #142236;
+      color: #eaf2ff;
+      font: 12.5px/1.6 var(--mono);
+    }
+    .formula-pill span {
+      display: block;
+      font: 600 11.5px var(--sans);
+      color: #93b3dc;
+      margin-bottom: 3px;
+    }
+    .formula-pill b { color: #7ae2b8; }
+
+    /* 6-Step dlopen Accordion / Cards */
+    .step-cards {
+      display: grid;
+      gap: 14px;
+      margin: 18px 0 22px;
+    }
+    .dl-card {
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--paper);
+      overflow: hidden;
+    }
+    .dl-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 11px 16px;
+      background: #f0f5fc;
+      border-bottom: 1px solid var(--line);
+    }
+    .dl-head-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .dl-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      background: var(--blue);
+      color: #fff;
+      font: 700 12px var(--mono);
+      flex-shrink: 0;
+    }
+    .dl-card.teal .dl-head { background: #eaf6f2; }
+    .dl-card.teal .dl-num { background: var(--teal); }
+    .dl-card.amber .dl-head { background: #fdf3ea; }
+    .dl-card.amber .dl-num { background: var(--amber); }
+    .dl-card.violet .dl-head { background: #f3effc; }
+    .dl-card.violet .dl-num { background: var(--violet); }
+    .dl-head h4 { margin: 0; font-size: 16px; color: var(--ink); }
+    .dl-src { font: 600 12px var(--mono); color: var(--muted); }
+    .dl-body { padding: 14px 16px; font-size: 14.2px; }
+    .dl-body p { margin: 0 0 10px; }
+    .dl-body p:last-child { margin-bottom: 0; }
+
+    /* Code block */
+    .codeblock {
+      margin: 14px 0 18px;
+      border: 1px solid #20344f;
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--code-bg);
+      color: var(--code-ink);
+    }
+    .code-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      background: var(--code-bar);
+      border-bottom: 1px solid #283f5f;
+      font: 600 12.5px var(--mono);
+      color: #b4cae6;
+    }
+    .codeblock pre {
+      margin: 0;
+      padding: 14px 16px;
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.68;
+    }
+    .ck { color: #8ec1ff; font-weight: 700; }
+    .cs { color: #7ae2b8; }
+    .cc { color: #7e97b8; }
+    .cw { color: #ffd08a; }
+
+    /* Interactive 6-step dlopen board */
+    .board {
+      margin: 20px 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--paper);
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(22, 35, 56, 0.04);
+    }
+    .board-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      background: #f8fafd;
+      border-bottom: 1px solid var(--line);
+    }
+    .board-toolbar button {
+      cursor: pointer;
+      min-height: 36px;
+      padding: 5px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      font: 600 13.5px var(--sans);
+    }
+    .board-toolbar button:hover:not(:disabled) { background: #edf3fb; }
+    .board-toolbar button:disabled { opacity: 0.5; cursor: default; }
+    #btn-play { background: var(--blue); border-color: var(--blue); color: #fff; min-width: 72px; }
+    #btn-play:hover { background: var(--blue-strong); }
+    #step-progress { margin-left: auto; font: 600 13px var(--mono); color: var(--muted); }
+
+    .board-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);
+    }
+    .board-steps { padding: 16px 18px; position: relative; }
+    .board-state {
+      padding: 16px 18px;
+      border-left: 1px solid var(--line);
+      background: #f9fbfe;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+    .board-col-title {
+      margin: 0 0 10px;
+      font-size: 12.5px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    .step-list {
+      position: relative;
+      list-style: none;
+      margin: 0;
+      padding: 0 0 0 22px;
+    }
+    .step-list::before {
+      content: "";
+      position: absolute;
+      left: 5px;
+      top: 20px;
+      bottom: 20px;
+      border-left: 2px solid #c2d1e5;
+    }
+    .step-list li { position: relative; margin: 0 0 8px; }
+    .step-list > li:nth-last-child(2) { margin-bottom: 0; }
+    .step-btn {
+      display: block;
+      width: 100%;
+      cursor: pointer;
+      text-align: left;
+      padding: 8px 11px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+    }
+    .step-btn:hover { background: #f3f7fe; }
+    .step-btn[aria-current="step"] { background: var(--blue-soft); border-color: var(--blue); }
+    .step-btn b { display: block; font-size: 13.8px; line-height: 1.4; }
+    .step-btn .subline {
+      display: block;
+      font: 12px/1.45 var(--mono);
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .step-btn[aria-current="step"] .subline { color: var(--blue-strong); }
+    .step-token {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 0 4px #cfe0fd;
+      pointer-events: none;
+    }
+    .step-token.moving { transition: transform 0.45s cubic-bezier(0.22, 0.72, 0.24, 1); }
+
+    .state-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .state-box.live { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(14, 107, 92, 0.12); }
+    .state-box-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 7px 11px;
+      background: #f0f4fa;
+      font-size: 12.8px;
+      font-weight: 700;
+    }
+    .state-box.live .state-box-head { background: var(--teal-soft); color: var(--teal); }
+    .state-box dl { margin: 0; padding: 8px 11px; font-size: 12.5px; }
+    .state-box dl > div { padding: 4px 0 4px 7px; border-left: 3px solid transparent; }
+    .state-box dl > div + div { border-top: 1px solid var(--line-soft); margin-top: 4px; padding-top: 5px; }
+    .state-box dl > div.changed { background: var(--teal-soft); border-left-color: var(--teal); border-radius: 0 4px 4px 0; }
+    .state-box dt { font: 700 12px var(--mono); color: var(--ink); }
+    .state-box dd { margin: 1px 0 0; font: 12.2px/1.45 var(--mono); color: var(--sub); overflow-wrap: anywhere; }
+    .state-box dl > div.changed dd { color: var(--teal); font-weight: 700; }
+
+    .board-annotation {
+      padding: 14px 18px 16px;
+      border-top: 1px solid var(--line);
+      background: #fff;
+    }
+    .board-annotation h3 { margin: 0 0 6px; font-size: 16px; }
+    .board-annotation p { margin: 0 0 10px; font-size: 14px; color: var(--sub); }
+    .board-code {
+      margin: 0;
+      padding: 10px 12px;
+      border-radius: 7px;
+      background: #edf3fb;
+      color: #152e4f;
+      font: 12.8px/1.6 var(--mono);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    /* Footer & Next */
+    .next-post {
+      margin-top: 20px;
+      padding: 16px 18px;
+      border: 1px dashed #a9bedd;
+      border-radius: 10px;
+      background: #f9fbff;
+      font-size: 14.5px;
+    }
+    .next-post strong { color: var(--blue-strong); }
+    .index-box {
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--paper);
+    }
+    .index-box ul { margin: 0; padding-left: 1.2em; font-size: 14px; line-height: 1.8; }
+    .footer-note {
+      margin-top: 26px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 1080px) {
+      .shell { grid-template-columns: 206px minmax(0, 1fr); }
+      .main { padding: 0 28px 72px; }
+      .roadmap { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .elf-dual { grid-template-columns: 1fr; }
+      .elf-mid { flex-direction: row; padding: 6px 0; }
+      .elf-mid .m-arrow big { transform: rotate(90deg); }
+      .formula-bar { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 820px) {
+      .shell { display: block; }
+      .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+      .side-inner { position: static; max-height: none; padding: 14px 16px; }
+      .brand, .side-title, .side-foot, .toc a.sub { display: none; }
+      .toc { display: flex; gap: 4px; overflow-x: auto; }
+      .toc a { white-space: nowrap; border-left: 0; border-bottom: 3px solid transparent; border-radius: 5px 5px 0 0; }
+      .toc a.active { border-bottom-color: var(--blue); }
+      .main { padding: 0 18px 60px; }
+      .handoff-pipe, .grid-3, .grid-2, .board-grid, .elf-anatomy { grid-template-columns: 1fr; }
+      .h-arr { transform: rotate(90deg); padding: 2px 0; }
+      .board-state { border-left: 0; border-top: 1px solid var(--line); }
+    }
+    @media (max-width: 520px) {
+      .roadmap { grid-template-columns: 1fr; }
+      #step-progress { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" aria-label="文章目录">
+      <div class="side-inner">
+        <div class="brand">ANDROID SECURITY / NOTES</div>
+        <a class="back-home" href="index.html">← 返回文档索引</a>
+        <div class="side-title">本篇目录</div>
+        <nav class="toc" id="toc">
+          <a href="#static-vs-shared" class="active"><span class="num">01</span>静态库 vs 动态库（动手制作）</a>
+          <a href="#elf-basics"><span class="num">02</span>先认识 ELF 与 PT_LOAD</a>
+          <a href="#s-elf-parts" class="sub">· ELF 四大组成与两套目录</a>
+          <a href="#s-ptload" class="sub">· PT_LOAD 结构体拆解</a>
+          <a href="#compile-bridge"><span class="num">03</span>编译链接、ASLR 与交接</a>
+          <a href="#elf-dual-view"><span class="num">04</span>ELF 双视图：磁盘 vs 内存</a>
+          <a href="#dlopen-steps"><span class="num">05</span>dlopen 6 步加载与链接</a>
+          <a href="#s-ns" class="sub">· ① Linker Namespace</a>
+          <a href="#s-load" class="sub">· ③ ElfReader 映射段</a>
+          <a href="#s-reloc" class="sub">· ⑤ 重定位与 RELRO</a>
+          <a href="#s-soinfo" class="sub">· ⑥ soinfo 与构造函数</a>
+          <a href="#walkthrough"><span class="num">06</span>6 步交互演示（GOT 填空）</a>
+          <a href="#anti-detect"><span class="num">07</span>风控视角与下篇预告</a>
+        </nav>
+        <div class="side-foot">
+          衔接主文：<a href="frida-inject-guide.html">Frida 17 注入原理</a><br>
+          底层对象：<code>AOSP bionic/linker</code><br>
+          目标架构：<code>ARM64 (AArch64)</code>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="content">
+        <header class="hero">
+          <div class="scope-row">
+            <span class="badge">补充专题 C · Linker 上篇</span>
+            <span class="badge teal">ARM64 Android · bionic/linker64</span>
+            <span class="badge amber">静态库/动态库制作 → 认识 ELF → 编译与 ASLR → 磁盘/内存双视图 → dlopen 全流程</span>
+          </div>
+          <h1>Android <code>dlopen</code> 是如何加载并链接一个 <code>.so</code> 的？</h1>
+          <p class="hero-lead">在看懂 Frida 17 为什么要自己实现“无痕自映射 Linker”之前，我们先从最朴素的动手问题出发：<strong>什么是静态库（<code>.a</code>）和动态库（<code>.so</code>）、怎么亲手编出来？编出来的 ELF 文件长什么样、<code>PT_LOAD</code> 和 <code>ASLR</code> 是什么？磁盘 ELF 进内存后怎么展开？最后拆透 <code>dlopen()</code> 的 6 步全流程。</strong></p>
+
+          <nav class="roadmap" aria-label="本文四步路线">
+            <a href="#static-vs-shared">
+              <span class="r-step">STEP 01</span>
+              <strong>动手做 <code>.a</code> 与 <code>.so</code></strong>
+              <span>用 3 行代码分清静态库与动态库的本质区别</span>
+            </a>
+            <a href="#elf-basics">
+              <span class="r-step">STEP 02</span>
+              <strong>认识 ELF 与 <code>PT_LOAD</code></strong>
+              <span>拆解刚刚编出来的 <code>.so</code> 的 4 大结构与零件</span>
+            </a>
+            <a href="#elf-dual-view">
+              <span class="r-step">STEP 03</span>
+              <strong>ASLR 与磁盘/内存双视图</strong>
+              <span>看透 <code>-fPIC</code>、<code>load_bias</code> 与 <code>.bss</code> 展开</span>
+            </a>
+            <a href="#dlopen-steps">
+              <span class="r-step">STEP 04</span>
+              <strong><code>dlopen</code> 6 步 + 演示</strong>
+              <span>Namespace → 映射 → 依赖 → 重定位 → <code>soinfo</code></span>
+            </a>
+          </nav>
+        </header>
+
+        <!-- ==================== 01 STATIC VS SHARED ==================== -->
+        <section id="static-vs-shared" class="chapter">
+          <p class="chapter-kicker">01 / Static (.a) vs Shared (.so)</p>
+          <h2>从动手开始：什么是静态库和动态库？怎么亲手做一个？</h2>
+          <p class="lead">不管后面的 ELF、重定位、<code>dlopen</code> 听起来多复杂，源头其实非常朴素：<strong>我们写了一段可复用的 C 函数，想打包给别的程序用——到底是在“编译时直接拷贝进去”，还是“等程序跑起来时再加载进来”？</strong>这就是静态库和动态库的根本分野。</p>
+
+          <p>先准备一个最简单的 3 行源码文件 <code>math_util.c</code>（加上头文件 <code>math_util.h</code>）和调用方 <code>main.c</code>：</p>
+          <figure class="codeblock">
+            <div class="code-head">
+              <span>准备素材 · math_util.c（库代码）与 main.c（调用方）</span>
+            </div>
+            <pre><span class="cc">// math_util.c —— 我们想复用给别人调用的函数</span>
+<span class="ck">int</span> add(<span class="ck">int</span> a, <span class="ck">int</span> b) {
+    <span class="ck">return</span> a + b;
+}
+
+<span class="cc">// main.c —— 调用方的业务代码</span>
+<span class="ck">#include</span> <span class="cs">&lt;stdio.h&gt;</span>
+<span class="ck">int</span> add(<span class="ck">int</span> a, <span class="ck">int</span> b);
+<span class="ck">int</span> main() {
+    printf(<span class="cs">"1 + 2 = %d\n"</span>, add(1, 2));
+    <span class="ck">return</span> 0;
+}</pre>
+          </figure>
+
+          <div class="grid-2">
+            <article class="mini-card">
+              <span class="kicker">STATIC LIBRARY · 静态库（.a）</span>
+              <h4>什么是静态库？—— 编译期直接“复制粘贴”</h4>
+              <p>静态库（Android / Linux 后缀 <code>.a</code>，Archive 归档包）本质上就是把一堆编译好的 <code>.o</code> 目标文件打成一个包（类似不压缩的 <code>.zip</code>）。当你链接它时，链接器直接把用到的函数机器码<strong>完整拷贝进你的最终程序里</strong>；程序生成后，哪怕把 <code>.a</code> 文件删掉也照常运行！</p>
+              <figure class="codeblock" style="margin:10px 0 0;">
+                <div class="code-head"><span>3 条命令制作并使用静态库（NDK / Linux）</span></div>
+                <pre><span class="cc"># 1. 编译成目标文件 (.o)，还不做最终链接</span>
+clang -c math_util.c -o math_util.o
+
+<span class="cc"># 2. 用 ar 把 .o 打包成静态库 libmath_util.a</span>
+ar rcs libmath_util.a math_util.o
+
+<span class="cc"># 3. 链接进可执行程序（add 的机器码直接被拷进 app_static）</span>
+clang main.c libmath_util.a -o app_static</pre>
+              </figure>
+            </article>
+
+            <article class="mini-card">
+              <span class="kicker">SHARED LIBRARY · 动态库（.so）</span>
+              <h4>什么是动态库？—— 运行期才“按需挂载”</h4>
+              <p>动态库（Android / Linux 后缀 <code>.so</code>，Shared Object 共享对象）在编译链接时<strong>不会</strong>把代码拷进调用方，只在调用方里记一条账（<code>DT_NEEDED: libmath_util.so</code>）；等程序真正跑起来时，再由系统的动态链接器（<code>linker64</code>）或代码里的 <strong><code>dlopen()</code></strong> 把 <code>.so</code> 映射进内存并把函数地址接上！</p>
+              <figure class="codeblock" style="margin:10px 0 0;">
+                <div class="code-head"><span>2 条命令制作动态库 .so（注意 -fPIC -shared）</span></div>
+                <pre><span class="cc"># 1. 加 -fPIC 和 -shared 直接编出动态库 .so</span>
+clang -fPIC -shared math_util.c -o libmath_util.so
+
+<span class="cc"># 2A. 方式一（启动时自动加载）：仅记录依赖名，不拷代码</span>
+clang main.c -L. -lmath_util -o app_dynamic
+
+<span class="cc"># 2B. 方式二（运行期手动加载）：代码里直接调 dlopen + dlsym</span>
+<span class="cc">// void* h = dlopen("libmath_util.so", RTLD_NOW);</span>
+<span class="cc">// int (*fn)(int,int) = dlsym(h, "add");</span></pre>
+              </figure>
+            </article>
+          </div>
+
+          <h3>一张表分清静态库 <code>.a</code> vs 动态库 <code>.so</code></h3>
+          <div class="table-wrap">
+            <table class="data" aria-label="静态库与动态库核心区别对照">
+              <thead>
+                <tr>
+                  <th scope="col">对比维度</th>
+                  <th scope="col">静态库（<code>.a</code>）</th>
+                  <th scope="col">动态库（<code>.so</code>）</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">文件本质</th>
+                  <td>多个 <code>.o</code> 目标文件的 <code>ar</code> 打包归档</td>
+                  <td>完整的 <strong>ELF 共享对象（<code>ET_DYN</code>）</strong></td>
+                </tr>
+                <tr>
+                  <th scope="row">链接发生时机</th>
+                  <td><strong>编译链接期</strong>（把机器码直接拷贝合并，地址一次性算死）</td>
+                  <td><strong>程序运行期</strong>（启动时由 <code>linker64</code> 自动加载，或运行中调 <code>dlopen()</code>）</td>
+                </tr>
+                <tr>
+                  <th scope="row">运行时依赖文件吗</th>
+                  <td><strong>不依赖</strong>，最终产物自包含（体积较大）</td>
+                  <td><strong>依赖</strong>，磁盘或内存里必须能找到对应的 <code>.so</code>（多进程可共享同一份只读代码页）</td>
+                </tr>
+                <tr>
+                  <th scope="row">在 Frida 里的真实案例</th>
+                  <td><code>libfrida-gum.a</code> / <code>libsepol.a</code> 被<strong>静态编进</strong> <code>frida-agent.so</code> 和 <code>frida-server</code>，所以手机里看不到独立文件</td>
+                  <td><code>frida-agent.so</code> 本身就是一个动态库，同时它运行期又依赖系统的 <code>libc.so</code>、<code>liblog.so</code> 等动态库</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="callout">
+            <p><strong>动手完，自然冒出三个核心问题：</strong><br>
+            ① 刚才一行 <code>clang -fPIC -shared</code> 造出来的 <code>libmath_util.so</code>，打开看里面的二进制到底长什么格式？（→ 见 <strong>02 · 先认识 ELF</strong>）<br>
+            ② 制作动态库时，为什么必须加上 <code>-fPIC</code> 这个参数？（→ 见 <strong>03 · 编译链接与 ASLR</strong>）<br>
+            ③ 当我们在程序里调用 <code>dlopen("libmath_util.so", RTLD_NOW)</code> 时，Android 的 <code>linker64</code> 怎么把这个文件变成内存里能直接执行的函数？（→ 见 <strong>04～06 章</strong>）</p>
+          </div>
+        </section>
+
+        <!-- ==================== 02 ELF BASICS ==================== -->
+        <section id="elf-basics" class="chapter">
+          <p class="chapter-kicker">02 / Meet ELF From Scratch</p>
+          <h2>先认识 ELF：Android 里的 <code>.so</code> 文件到底长什么样？</h2>
+          <p class="lead"><strong>ELF（Executable and Linkable Format）</strong>是 Linux 与 Android 统一的二进制文件格式，地位就像 Windows 里的 PE 格式（<code>.exe</code> / <code>.dll</code>）。Android 上的 <code>frida-server</code>、<code>/system/bin/linker64</code> 以及每一个 <code>.so</code> 动态库都是 ELF 文件——拿十六进制编辑器打开，开头前 4 个字节永远是魔数 <code>7F 45 4C 46</code>（即 <code>\x7fELF</code>）。</p>
+
+          <h3 id="s-elf-parts">2.1 用“一本书”的比喻，一眼看懂 ELF 的 4 大组成部分</h3>
+          <p>初学者读 ELF 最容易晕的地方，在于它<strong>竟然有两套目录表</strong>（<code>Program Header</code> 和 <code>Section Header</code>）。其实把 ELF 当成一本书，这两套目录各管各的读者，瞬间就不乱了：</p>
+
+          <figure class="viz-box" aria-label="ELF 文件四大组成部分解剖图">
+            <div class="viz-head">
+              <strong>图 1 · 一个 ELF（<code>.so</code>）文件的 4 大组成部分（一本书 + 两套目录）</strong>
+              <span class="muted"><code>readelf -h / -l / -S libdemo.so</code> 看到的就是这 4 块</span>
+            </div>
+            <div class="viz-body">
+              <div class="elf-anatomy">
+                <div class="elf-book">
+                  <div class="book-part">
+                    <div class="book-part-head">
+                      <b>① ELF Header（<code>Elf64_Ehdr</code>，固定 64 字节）</b>
+                      <span>书的封面 · 偏移 0x0</span>
+                    </div>
+                    <p>写着文件基本身份：魔数 <code>\x7fELF</code>、64 位 ARM64（<code>EM_AARCH64</code>）、类型是动态库（<code>ET_DYN</code>），以及最关键的两个指针——<strong>“两套目录表分别在文件第几字节、一共有几条”</strong>（<code>e_phoff/e_phnum</code> 与 <code>e_shoff/e_shnum</code>）。</p>
+                  </div>
+
+                  <div class="book-part p-phdr">
+                    <div class="book-part-head">
+                      <b>② Program Header Table（<code>Elf64_Phdr[]</code>）</b>
+                      <span>给系统 / dlopen 看的“施工目录”</span>
+                    </div>
+                    <p>又叫<strong>段视图（Segment View）</strong>。它把正文按<strong>内存权限（R / RX / RW）</strong>粗分成几大块，并告诉 <code>dlopen</code>：“哪几块要 <code>mmap</code> 进内存（<code>PT_LOAD</code>）、动态表在哪（<code>PT_DYNAMIC</code>）、哪段要锁只读（<code>PT_GNU_RELRO</code>）”。<strong>运行期只认这张表！</strong></p>
+                  </div>
+
+                  <div class="book-part p-body">
+                    <div class="book-part-head">
+                      <b>③ 正文内容区（代码、数据与动态链接表）</b>
+                      <span>书的正文页</span>
+                    </div>
+                    <p>真正存放机器指令（<code>.text</code>）、字符串常量（<code>.rodata</code>）、全局变量（<code>.data</code>），以及给 <code>dlopen</code> 用的动态链接零件（<code>.dynamic</code>、<code>.dynsym</code>、<code>.rela.*</code>、<code>.got</code>、<code>.init_array</code>）。</p>
+                  </div>
+
+                  <div class="book-part p-shdr">
+                    <div class="book-part-head">
+                      <b>④ Section Header Table（<code>Elf64_Shdr[]</code>）</b>
+                      <span>给编译器 / IDA 看的“章节目录”</span>
+                    </div>
+                    <p>又叫<strong>节视图（Section View）</strong>，放在文件末尾，精细标出 <code>.text</code>、<code>.rodata</code>、<code>.data</code>、<code>.bss</code> 每个小节的起止位置。<strong>注意：运行期 <code>dlopen</code> 压根不读它，也不会加载进内存！</strong></p>
+                  </div>
+                </div>
+
+                <div>
+                  <figure class="codeblock" style="margin:0;">
+                    <div class="code-head">
+                      <span>ELF 封面结构体核心字段（Elf64_Ehdr）</span>
+                    </div>
+                    <pre><span class="ck">typedef struct</span> {
+  <span class="ck">unsigned char</span> e_ident[16]; <span class="cc">// 开头 4 字节固定 \x7fELF + 64位标识</span>
+  <span class="ck">uint16_t</span> e_type;           <span class="cc">// ET_DYN(3) 表示 .so 动态库 / PIE 可执行文件</span>
+  <span class="ck">uint16_t</span> e_machine;        <span class="cc">// EM_AARCH64(183) 表示 ARM64</span>
+  …
+  <span class="ck">uint64_t</span> e_phoff;          <span class="cc">// ★ Program Header 表在文件中的偏移</span>
+  <span class="ck">uint64_t</span> e_shoff;          <span class="cc">//   Section Header 表在文件中的偏移</span>
+  <span class="ck">uint16_t</span> e_phnum;          <span class="cc">// ★ Program Header 一共有多少条</span>
+  <span class="ck">uint16_t</span> e_shnum;          <span class="cc">//   Section Header 一共有多少条</span>
+} <span class="cs">Elf64_Ehdr</span>;</pre>
+                  </figure>
+                  <div class="callout teal" style="margin:12px 0 0;">
+                    <p><strong>记住一个反常识的结论：</strong><br>
+                    Section（节）和 Segment（段）描述的是<strong>同一份正文字节</strong>的两种视角——一个 <code>PT_LOAD</code> 段往往包着好几个同权限的 Section（例如只读执行段同时包着 <code>.plt</code> 和 <code>.text</code>）。正因为 <code>dlopen</code> 只看 <code>Program Header</code>，所以哪怕把文件末尾的 <code>Section Header</code> 全删掉，<code>.so</code> 照样能正常加载运行！</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </figure>
+
+          <h3 id="s-ptload">2.2 彻底看懂 <code>PT_LOAD</code>：<code>dlopen</code> 映射内存的“施工单”</h3>
+          <p><code>Program Header Table</code> 里通常有 7～10 条 <code>Elf64_Phdr</code> 记录，每条都有一个 <code>p_type</code> 类型字段。其中<strong>只有标记为 <code>PT_LOAD</code>（枚举值 = <code>1</code>，意为 Program Type: Loadable）的条目，才会真正被 <code>mmap</code> 搬进内存</strong>！其余常见类型大多只是“指路牌”：</p>
+          <ul>
+            <li><strong><code>PT_LOAD</code>（通常 2～4 条）</strong>：真正要映射进进程内存的段。为什么拆成 3～4 条而不是合一起用 1 条？因为现代 CPU 控制权限的最小单位是<strong>一整页内存（4KB / 16KB）</strong>，且安全规范要求 <strong>W^X（可写不可执行、可执行不可写）</strong>，所以链接器把只读元数据（<code>R--</code>）、机器码（<code>R-X</code>）、RELRO 表（<code>RW- → R--</code>）、可写数据（<code>RW-</code>）分别打成独立的 <code>PT_LOAD</code>。</li>
+            <li><strong><code>PT_DYNAMIC</code>（1 条）</strong>：指路牌（本身数据已包在某个 <code>PT_LOAD</code> 内），告诉 <code>dlopen</code> 动态链接总表（<code>.dynamic</code>）在哪个虚拟地址。</li>
+            <li><strong><code>PT_GNU_RELRO</code>（1 条）</strong>：指路牌，告诉 <code>dlopen</code> 重定位填完 <code>.got</code> 后，把哪一段地址用 <code>mprotect</code> 锁死成只读。</li>
+            <li><strong><code>PT_GNU_STACK</code> / <code>PT_NOTE</code></strong>：辅助属性标记（声明栈不可执行、记录构建信息等）。</li>
+          </ul>
+
+          <figure class="codeblock">
+            <div class="code-head">
+              <span>每一条 PT_LOAD 就是一个 Elf64_Phdr 结构体 —— 所谓“按 PT_LOAD 映射”就是个朴素的 for 循环</span>
+            </div>
+            <pre><span class="ck">typedef struct</span> {
+  <span class="ck">uint32_t</span> p_type;   <span class="cc">// == PT_LOAD (1) 表示“这一块必须 mmap 进内存”</span>
+  <span class="ck">uint32_t</span> p_flags;  <span class="cc">// 内存页权限：PF_R(读) | PF_W(写) | PF_X(执行)</span>
+  <span class="ck">uint64_t</span> p_offset; <span class="cc">// 在磁盘 .so 文件里的起始字节偏移</span>
+  <span class="ck">uint64_t</span> p_vaddr;  <span class="cc">// 映射到内存后，相对加载基址 load_bias 的虚拟偏移</span>
+  <span class="ck">uint64_t</span> p_filesz; <span class="cc">// 在磁盘文件里实际占多少字节</span>
+  <span class="ck">uint64_t</span> p_memsz;  <span class="cc">// 在内存里一共要占多少字节（若 &gt; p_filesz，差值就是 .bss 清零区！）</span>
+} <span class="cs">Elf64_Phdr</span>;
+
+<span class="cc">// dlopen 映射内存的核心循环（伪代码）：</span>
+<span class="ck">for</span> (<span class="ck">int</span> i = 0; i &lt; ehdr-&gt;e_phnum; i++) {
+  <span class="ck">if</span> (phdr[i].p_type != <span class="cw">PT_LOAD</span>) <span class="ck">continue</span>;   <span class="cc">// 非 PT_LOAD 的指路牌条目不单独 mmap</span>
+  <span class="cc">// 把磁盘 [p_offset .. p_offset + p_filesz] 映射到内存 [load_bias + p_vaddr]</span>
+  <span class="cc">// 权限按 p_flags 设置，如果 p_memsz &gt; p_filesz 就把尾部多出来的 .bss 清零</span>
+}</pre>
+          </figure>
+
+          <h3>2.3 正文里常见的 7 个核心零件速查表（后面反复出现）</h3>
+          <div class="table-wrap">
+            <table class="data" aria-label="ELF 动态库常见核心节与表速查">
+              <thead>
+                <tr>
+                  <th scope="col">名字</th>
+                  <th scope="col">通俗理解</th>
+                  <th scope="col">谁会用到它</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row"><code>.text</code> / <code>.rodata</code></th>
+                  <td>编译出来的 ARM64 机器指令 / 只读常量（如字符串字面量）</td>
+                  <td>CPU 直接取指执行 / 读取（<code>R-X</code> 与 <code>R--</code>）</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>.data</code> / <code>.bss</code></th>
+                  <td><code>.data</code> 存有初始值的全局变量；<code>.bss</code> 存未初始化（默认为 0）的全局变量，<strong>在磁盘里占 0 字节</strong></td>
+                  <td>运行期读写（<code>RW-</code>），<code>.bss</code> 由 <code>dlopen</code> 在内存展开并清零</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>.dynamic</code>（<code>PT_DYNAMIC</code>）</th>
+                  <td><strong>动态链接总索引表</strong>：里面一条条记着 <code>DT_NEEDED</code>（依赖库名）、符号表地址、重定位表地址、构造函数地址</td>
+                  <td><code>dlopen</code> 进内存后第一个解析的“总控说明书”</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>.dynsym</code> &amp; <code>.dynstr</code></th>
+                  <td>动态符号表 &amp; 字符串表：记录本库<strong>导出</strong>哪些函数名（供别人 <code>dlsym</code>）以及<strong>导入</strong>哪些外部函数名</td>
+                  <td><code>dlopen</code> 重定位查外部符号 + 外部调 <code>dlsym()</code></td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>.rela.dyn</code> &amp; <code>.rela.plt</code></th>
+                  <td><strong>重定位“填空清单”</strong>：一条条列明“内存哪个偏移处需要填库内新地址或外部函数地址”</td>
+                  <td><code>dlopen</code> 步骤 5 遍历执行填空</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>.got</code> &amp; <code>.plt</code></th>
+                  <td><code>.got</code>（Global Offset Table）是存放真实函数/变量地址的<strong>指针槽数组</strong>；<code>.plt</code> 是跳转桩代码，负责从 <code>.got</code> 取出地址跳过去</td>
+                  <td>实现 <code>-fPIC</code> 地址无关调用的核心跳板</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>.init_array</code></th>
+                  <td>函数指针数组：存放 C++ 全局对象构造函数以及 <code>__attribute__((constructor))</code> 标记的初始化函数</td>
+                  <td><code>dlopen</code> 全部链接完毕后自动逐个执行</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>2.4 别搞混：<code>.dynamic</code> 和 <code>.dynsym</code> / <code>.dynstr</code> / <code>.rela.plt</code> 怎么协作？</h3>
+          <p>初学者常误以为 <code>.dynamic</code> 里直接写满了本库用到的每一个外部函数名。其实 <strong><code>.dynamic</code> 只是一张 Key-Value 总索引表</strong>：它直接记录“依赖哪些外部 <code>.so</code> 库名（<code>DT_NEEDED</code>）”，然后用指针分别指向真正存函数名和填空槽位的另外三张表：</p>
+
+          <figure class="codeblock">
+            <div class="code-head">
+              <span>四表协作关系 · 从 PT_DYNAMIC 顺藤摸瓜找到外部库、外部函数名与 .got 填空位</span>
+            </div>
+            <pre><span class="ck">.dynamic</span>（Key-Value 总索引表，由 <span class="cw">PT_DYNAMIC</span> 指向）
+  ├── <span class="cs">DT_NEEDED</span>     ──▶ 指向 .dynstr 里的 <span class="cs">"liblog.so"</span>、<span class="cs">"libc.so"</span>      <span class="cc">★ 记录：用了哪些外部 .so 库</span>
+  ├── <span class="cs">DT_SYMTAB</span>     ──▶ 指向 <span class="ck">.dynsym</span>（动态符号表）                     <span class="cc">★ 记录：导出函数 + 外部未定义(UND)函数</span>
+  ├── <span class="cs">DT_STRTAB</span>     ──▶ 指向 <span class="ck">.dynstr</span>（字符串池：存所有库名与函数名 ASCII）
+  ├── <span class="cs">DT_JMPREL</span>     ──▶ 指向 <span class="ck">.rela.plt</span>（外部函数重定位表）             <span class="cc">★ 记录：把第 N 号外部函数填进哪个 .got 槽</span>
+  └── <span class="cs">DT_INIT_ARRAY</span> ──▶ 指向 <span class="ck">.init_array</span>（构造函数指针数组）</pre>
+          </figure>
+
+          <div class="callout amber">
+            <p><strong>经典冷知识（ELF 与 Windows DLL 的重要区别 · <code>LD_PRELOAD</code> 劫持原理）：</strong><br>
+            在 Windows PE（<code>.dll</code>）里，导入表会明确写死“去 <code>kernel32.dll</code> 找 <code>CreateFileW</code>”；但在 Linux / Android 的 ELF 里，<strong><code>DT_NEEDED</code>（依赖库清单）和 <code>.dynsym</code>（外部函数清单）是平级分开的</strong>，并没有把每个外部函数死绑到某一个具体 <code>.so</code> 上！运行期 <code>dlopen</code> 查 <code>__android_log_print</code> 时，会沿着已加载的依赖库顺序<strong>挨个查</strong>，谁先导出同名符号就用谁的——这正是 Linux/Android 上 <code>LD_PRELOAD</code> 能够抢先劫持系统函数的底层原因。</p>
+          </div>
+        </section>
+
+        <!-- ==================== 03 COMPILE BRIDGE ==================== -->
+        <section id="compile-bridge" class="chapter">
+          <p class="chapter-kicker">03 / From Build Time to Runtime</p>
+          <h2>前置桥梁：编译链接、ASLR 与 <code>dlopen</code> 的交接</h2>
+          <p class="lead">认识了 ELF 的零件后，就能看懂为什么 <code>.so</code> 里偏偏要有 <code>.got</code> 和重定位表：<strong>编译期（电脑上 <code>clang + lld</code>）负责出一张“留好空白格的试卷 + 填空说明书”，运行期 <code>dlopen</code> 负责把真实内存地址填进去。</strong>而逼出这套机制的幕后推手，就是 <strong>ASLR</strong>。</p>
+
+          <div class="callout violet">
+            <p><strong>先扫清一个核心名词：ASLR 是什么？（Address Space Layout Randomization，地址空间布局随机化）</strong></p>
+            <p>它是 Android / Linux / iOS / Windows 默认开启的<strong>内核安全机制</strong>：为了防止黑客利用缓冲区溢出直接跳去固定地址的 <code>system()</code>，内核在<strong>每次启动进程或 <code>dlopen</code> 加载 <code>.so</code> 时，都会随机挑选一个内存加载基址</strong>（比如这次 <code>libdemo.so</code> 落在 <code>0x7b40_0000</code>，下次重启变成 <code>0x7e91_0000</code>）。</p>
+            <p>这也解释了两件大事：① 编译期根本不可能提前写死绝对内存地址，只能把“最终基址 <code>load_bias</code>”留给运行期 <code>dlopen</code>；② Frida 写 Native Hook 时总要写 <code>Module.findBaseAddress("libxxx.so").add(0x1234)</code>（IDA 看到的是相对偏移，真机运行必须加上本次随机基址）。<em>（注：Android 上所有 App 都由同一个 <code>zygote</code> 进程 <code>fork</code> 出来，因此 <code>zygote</code> 里早已加载好的系统库在同一次开机周期内基址往往相同，重启手机才会重新随机。）</em></p>
+          </div>
+
+          <figure class="viz-box" aria-label="编译链接期与运行期 dlopen 交接图">
+            <div class="viz-head">
+              <strong>图 2 · 为什么一个 <code>.so</code> 必须经历“静态链接 + 运行期动态链接”两棒接力？</strong>
+              <span class="muted">clang -shared -fPIC demo.c -llog -o libdemo.so</span>
+            </div>
+            <div class="viz-body">
+              <div class="handoff-pipe">
+                <div class="h-node">
+                  <span class="tag">第一棒 · 电脑编译期</span>
+                  <b>编译器 + 静态链接器（<code>lld</code>）</b>
+                  <span>生成 ARM64 机器码并把同权限节打包成 <code>PT_LOAD</code>。因为有 <strong>ASLR</strong>，它不知道两个运行期事实：① 自己将来会被装到哪个基址 <code>load_bias</code>？② <code>liblog.so</code> 里的函数将来在哪个内存地址？</span>
+                </div>
+                <div class="h-arr" aria-hidden="true">→</div>
+                <div class="h-node mid">
+                  <span class="tag">交接物 · 磁盘上的 libdemo.so</span>
+                  <b>“留空试卷 + 填空说明书”</b>
+                  <span>代码段里不写死绝对地址，改为去 <code>.got</code> 查表；同时在 ELF 里留下 <code>DT_NEEDED</code>（依赖清单）、<code>.rela.dyn/.rela.plt</code>（填空清单）、<code>PT_LOAD</code>（映射施工单）和 <code>.init_array</code>。</span>
+                </div>
+                <div class="h-arr" aria-hidden="true">→</div>
+                <div class="h-node run">
+                  <span class="tag">第二棒 · 手机运行期</span>
+                  <b><code>dlopen()</code> / <code>linker64</code></b>
+                  <span>按 <code>PT_LOAD</code> 映射进内存拿到随机 <code>load_bias</code> → 加载依赖库 → 照着重定位表把真实地址填入 <code>.got</code> → 登记 <code>soinfo</code> 账本 → 跑构造函数。试卷彻底活过来！</span>
+                </div>
+              </div>
+            </div>
+          </figure>
+
+          <div class="table-wrap">
+            <table class="data" aria-label="编译链接期产物与 dlopen 运行期动作对照">
+              <thead>
+                <tr>
+                  <th scope="col">编译 / 静态链接期干的事</th>
+                  <th scope="col">留在 <code>.so</code> 里的结构</th>
+                  <th scope="col">运行期 <code>dlopen()</code> 接手干的事</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">1. 开启 <code>-fPIC</code> 地址无关代码</th>
+                  <td><code>.got</code> / <code>.plt</code>（初始为空或占位地址）</td>
+                  <td>只读代码段（<code>.text</code>）一字节都不改，只需把真实地址写进可写的 <code>.got</code> 槽位</td>
+                </tr>
+                <tr>
+                  <th scope="row">2. 登记编译参数里的 <code>-llog -lm</code></th>
+                  <td><code>PT_DYNAMIC</code> → <code>DT_NEEDED</code></td>
+                  <td>按依赖名递归加载 <code>liblog.so</code>、<code>libm.so</code> 等外部库</td>
+                </tr>
+                <tr>
+                  <th scope="row">3. 列出所有待修正的地址位置</th>
+                  <td><code>.rela.dyn</code> / <code>.rela.plt</code>（重定位表）</td>
+                  <td>逐条计算 <code>load_bias + addend</code> 或外部符号地址，回填到目标槽位</td>
+                </tr>
+                <tr>
+                  <th scope="row">4. 按权限合并段 &amp; 汇总导出/构造</th>
+                  <td><code>PT_LOAD</code>、<code>.dynsym</code>、<code>.init_array</code></td>
+                  <td>按 <code>PT_LOAD</code> 做 <code>mmap</code>，用 <code>.dynsym</code> 支撑 <code>dlsym</code>，最后执行 <code>.init_array</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="callout amber">
+            <p><strong>回到第 01 章的疑问：制作 <code>.so</code> 时，为什么必须加上 <code>-fPIC</code>？</strong><br>
+            如果不加 <code>-fPIC</code>，编译器会在只读代码段（<code>.text</code>）里直接写死绝对地址，导致运行期 <code>dlopen</code> 被迫改写代码页（Text Relocation / <code>DT_TEXTREL</code>），破坏多进程共享只读代码页——Android 6.0+ 已直接禁止加载带文本重定位的 <code>.so</code>。加上 <code>-fPIC</code> 后，代码段保持纯只读，所有待修正地址全部集中到数据段的 <code>.got</code> 槽位里。</p>
+          </div>
+        </section>
+
+        <!-- ==================== 04 ELF DUAL VIEW ==================== -->
+        <section id="elf-dual-view" class="chapter">
+          <p class="chapter-kicker">04 / ELF On Disk vs In Memory</p>
+          <h2>ELF 双视图深度对比：磁盘上的 <code>.so</code> vs 加载进内存后的 <code>.so</code></h2>
+          <p class="lead">这是理解 <code>dlopen</code>、写微型 Linker、甚至做逆向内存 dump <code>.so</code> 时<strong>最容易踩坑的核心分水岭</strong>：<strong>一个 <code>.so</code> 躺在磁盘上时是“紧凑打包的”，加载进内存后会被按内存页（4KB / Android 15 为 16KB）重新展开、拉出空隙、补出 <code>.bss</code>，还会直接扔掉节表！</strong></p>
+
+          <figure class="viz-box" aria-label="ELF 磁盘文件格式与内存加载格式双栏对比图">
+            <div class="viz-head">
+              <strong>图 3 · 同一个 <code>libdemo.so</code>：磁盘文件视图（File View） ↔ 进程内存视图（Memory View）</strong>
+              <span class="muted">假设 <code>dlopen</code> 选定加载基址 <code>load_bias = 0x7b40_0000</code>（页大小 4KB = 0x1000）</span>
+            </div>
+            <div class="viz-body">
+              <div class="elf-dual">
+                <!-- Left: On Disk -->
+                <div class="elf-col">
+                  <div class="elf-col-head">
+                    <strong>磁盘上的 ELF 文件（紧凑存放）</strong>
+                    <span>按 p_offset / p_filesz</span>
+                  </div>
+                  <div class="elf-blocks">
+                    <div class="elf-blk seg-r">
+                      <div class="elf-blk-top">
+                        <b>ELF Header + Program Headers</b>
+                        <span class="elf-addr">off 0x0000</span>
+                      </div>
+                      <span class="elf-perm">PT_LOAD #0</span> <code>Ehdr</code>(64B) + <code>Phdr[]</code> + <code>.dynsym</code> / <code>.dynstr</code> / <code>.rela.dyn</code> / <code>.rodata</code>（紧凑排布，<code>filesz = 0x0c00</code>）
+                    </div>
+
+                    <div class="elf-blk seg-rx">
+                      <div class="elf-blk-top">
+                        <b>代码区域：<code>.plt</code> + <code>.text</code></b>
+                        <span class="elf-addr">off 0x0c00</span>
+                      </div>
+                      <span class="elf-perm">PT_LOAD #1</span> ARM64 机器指令，紧贴上一段结尾，无需在磁盘里白占对齐零字节（<code>filesz = 0x1200</code>）
+                    </div>
+
+                    <div class="elf-blk seg-relro">
+                      <div class="elf-blk-top">
+                        <b>链接元数据：<code>.init_array</code> / <code>.dynamic</code> / <code>.got</code></b>
+                        <span class="elf-addr">off 0x1e00</span>
+                      </div>
+                      <span class="elf-perm">PT_LOAD #2</span> 属于 <code>PT_GNU_RELRO</code> 范围：磁盘里 <code>.got</code> 此时还是空占位！
+                    </div>
+
+                    <div class="elf-blk seg-rw">
+                      <div class="elf-blk-top">
+                        <b>可写数据：<code>.data</code>（已初始化全局变量）</b>
+                        <span class="elf-addr">off 0x2200</span>
+                      </div>
+                      <span class="elf-perm">PT_LOAD #3</span> 只存有初始值的数据（如 <code>int g = 42</code>），<strong><code>.bss</code> 在磁盘里占 0 字节！</strong>（<code>filesz = 0x0300</code>，但头里记录 <code>memsz = 0x1900</code>）
+                    </div>
+
+                    <div class="elf-blk seg-shdr">
+                      <div class="elf-blk-top">
+                        <b>Section Header Table（节表 <code>Shdr[]</code>）+ <code>.shstrtab</code></b>
+                        <span class="elf-addr">文件末尾</span>
+                      </div>
+                      <span class="elf-perm">仅静态视图</span> 给 <code>readelf -S</code> / IDA / 编译器看，<strong>不属于任何 <code>PT_LOAD</code> 段</strong>！
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Middle Arrows -->
+                <div class="elf-mid" aria-hidden="true">
+                  <div class="m-arrow"><span>mmap R--</span><big>→</big></div>
+                  <div class="m-arrow"><span>mmap R-X</span><big>→</big></div>
+                  <div class="m-arrow"><span>RW→R--</span><big>→</big></div>
+                  <div class="m-arrow"><span>mmap+清零</span><big>→</big></div>
+                  <div class="m-arrow drop"><span>不加载 ✕</span><big>↛</big></div>
+                </div>
+
+                <!-- Right: In Memory -->
+                <div class="elf-col mem">
+                  <div class="elf-col-head">
+                    <strong>加载进内存后的 ELF（按页对齐展开）</strong>
+                    <span>按 load_bias + p_vaddr / p_memsz</span>
+                  </div>
+                  <div class="elf-blocks">
+                    <div class="elf-blk seg-r">
+                      <div class="elf-blk-top">
+                        <b>只读元数据页（含 ELF/Phdr/符号/重定位表）</b>
+                        <span class="elf-addr">0x7b40_0000</span>
+                      </div>
+                      <span class="elf-perm">R--</span> <code>vaddr = 0x0000</code>；页尾 <code>0x0c00..0x0fff</code> 为页对齐补齐，绝不和下一段混在同一物理权限页
+                    </div>
+
+                    <div class="elf-blk seg-rx">
+                      <div class="elf-blk-top">
+                        <b>代码执行页（<code>.plt</code> + <code>.text</code>）</b>
+                        <span class="elf-addr">0x7b40_1000</span>
+                      </div>
+                      <span class="elf-perm">R-X</span> <code>vaddr = 0x1000</code>（注意：磁盘在 <code>0x0c00</code>，内存跳到了 <code>0x1000</code> 页边界！）
+                    </div>
+
+                    <div class="elf-blk seg-relro">
+                      <div class="elf-blk-top">
+                        <b>RELRO 页（<code>.init_array</code> / <code>.dynamic</code> / <code>.got</code>）</b>
+                        <span class="elf-addr">0x7b40_3000</span>
+                      </div>
+                      <span class="elf-perm">RW- → R--</span> 加载时先 <code>RW-</code> 让 <code>dlopen</code> 填满 <code>.got</code> 真实地址；填完立刻 <code>mprotect</code> 锁死成 <code>R--</code> 防 GOT 劫持！
+                    </div>
+
+                    <div class="elf-blk seg-rw">
+                      <div class="elf-blk-top">
+                        <b>可写数据页（<code>.data</code>）</b>
+                        <span class="elf-addr">0x7b40_4000</span>
+                      </div>
+                      <span class="elf-perm">RW-</span> <code>vaddr = 0x4000</code>，从文件映射前 <code>0x0300</code> 字节（<code>p_filesz</code>）
+                    </div>
+
+                    <div class="elf-blk seg-bss">
+                      <div class="elf-blk-top">
+                        <b>凭空展开的 <code>.bss</code> 匿名零页（未初始化全局变量）</b>
+                        <span class="elf-addr">0x7b40_4300 .. 5900</span>
+                      </div>
+                      <span class="elf-perm">RW- · 匿名零页</span> 磁盘里占 0 字节，但内存里必须把 <code>p_memsz - p_filesz</code> 补足并清零（页内尾部 <code>memset(0)</code>，超出的整页用匿名 <code>MAP_ANONYMOUS</code> 映射）！
+                    </div>
+
+                    <div class="elf-blk seg-gap">
+                      <strong>节表（Section Header Table）不在内存里！</strong>——这也是为什么加固或 Frida 抹掉 Section 表，进程照样稳稳运行；所有运行期信息全部从 <code>PT_DYNAMIC</code> 索引。
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="formula-bar">
+                <div class="formula-pill">
+                  <span>① 决定整块映射的基准偏移</span>
+                  <b>load_bias</b> = mmap_base - min_vaddr<br>
+                  <small>（绝大多数 .so 的 min_vaddr = 0）</small>
+                </div>
+                <div class="formula-pill">
+                  <span>② 磁盘 vs 内存定位同一个字节</span>
+                  磁盘：<b>p_offset</b> + delta<br>
+                  内存：<b>load_bias + p_vaddr</b> + delta
+                </div>
+                <div class="formula-pill">
+                  <span>③ 为什么内存里比磁盘大？</span>
+                  1) 各段按 <b>PAGE_SIZE</b> 对齐留空隙<br>
+                  2) <code>.bss</code> 按 <b>p_memsz - p_filesz</b> 展开
+                </div>
+              </div>
+            </div>
+            <figcaption class="viz-foot"><strong>逆向经典踩坑解释：</strong>这就是为什么你从 <code>/proc/pid/maps</code> 直接把内存里的 <code>.so</code> dump 下来，用 IDA 打开经常报偏移错乱——因为内存里是按 <code>p_vaddr</code> 展开的，而磁盘 ELF 工具默认按 <code>p_offset</code> 读（必须用 SoFixer 把每段的 <code>p_offset = p_vaddr</code>、<code>p_filesz = p_memsz</code> 修复对齐才行）！</figcaption>
+          </figure>
+
+          <h3>磁盘 ELF 与内存 ELF 的 5 个关键差异速查</h3>
+          <div class="table-wrap">
+            <table class="data" aria-label="磁盘 ELF 与内存 ELF 差异对照">
+              <thead>
+                <tr>
+                  <th scope="col">维度</th>
+                  <th scope="col">磁盘上的 <code>.so</code> 文件</th>
+                  <th scope="col">加载进内存后的 <code>.so</code></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">核心索引表</th>
+                  <td>Program Header（<code>Phdr</code>）与 Section Header（<code>Shdr</code>）都在</td>
+                  <td><strong>只用 <code>Phdr</code>（特别是 <code>PT_LOAD</code> 与 <code>PT_DYNAMIC</code>）</strong>；<code>Shdr</code> 根本不进内存</td>
+                </tr>
+                <tr>
+                  <th scope="row">段间距与大小</th>
+                  <td>紧凑排列，省磁盘空间（按 <code>p_offset</code> / <code>p_filesz</code>）</td>
+                  <td>不同权限的段必须分属不同内存页（4KB 或 Android 15 的 16KB），页边界间有对齐间隙</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>.bss</code> 区域</th>
+                  <td><strong>占 0 字节</strong>，仅在 <code>p_memsz &gt; p_filesz</code> 中记录大小</td>
+                  <td>真实分配可写内存并全部清零（尾字节 <code>memset</code> + 多出整页匿名 <code>mmap</code>）</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>.got</code> 表内容</th>
+                  <td>空的 <code>0</code> 或指向 <code>.plt</code> 桩代码的初始占位值</td>
+                  <td>已经被 <code>dlopen</code> 填满真实运行期函数/全局变量地址，并常被 <code>RELRO</code> 锁成只读</td>
+                </tr>
+                <tr>
+                  <th scope="row">内存权限</th>
+                  <td>磁盘文件无页级权限区分</td>
+                  <td>严格拆分 <code>R--</code>（元数据）、<code>R-X</code>（代码）、<code>RW-</code>（数据），遵循 W^X（不同时可写可执行）</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- ==================== 05 DLOPEN 6 STEPS ==================== -->
+        <section id="dlopen-steps" class="chapter">
+          <p class="chapter-kicker">05 / Inside bionic/linker64</p>
+          <h2>Android <code>dlopen()</code> 6 步全流程拆解</h2>
+          <p class="lead">当你写下 <code>dlopen("libdemo.so", RTLD_NOW)</code>，<code>libdl.so</code> 只是一个空壳转发器，真正干活的是位于 <code>/system/bin/linker64</code> 里的 <strong><code>__loader_dlopen()</code> → <code>do_dlopen()</code></strong>。整个过程可以拆成 6 个环环相扣的步骤：</p>
+
+          <div class="step-cards">
+            <!-- Step 1 -->
+            <article id="s-ns" class="dl-card">
+              <div class="dl-head">
+                <div class="dl-head-left">
+                  <span class="dl-num">1</span>
+                  <h4>Android 7+ Linker Namespace 权限校验</h4>
+                </div>
+                <span class="dl-src">dlfcn.cpp → linker.cpp::dlopen_ext()</span>
+              </div>
+              <div class="dl-body">
+                <p>Android 7.0 起引入了 <strong>Linker Namespace 隔离</strong>：防止普通 App 随便 <code>dlopen</code> 系统私有库（如 <code>libart.so</code>）。调用 <code>dlopen()</code> 时，<code>libdl.so</code> 会通过 <code>__builtin_return_address(0)</code> 把<strong>调用者的返回地址 <code>caller_addr</code></strong> 传给 <code>__loader_dlopen(name, flags, caller_addr)</code>。</p>
+                <p><code>linker64</code> 查 <code>caller_addr</code> 落在哪个 <code>soinfo</code> 里，进而确定你属于 <code>classloader-namespace</code>（App 沙箱命名空间，只能访问 NDK 公开白名单系统库）还是 <code>default</code>（系统命名空间）。</p>
+                <div class="callout amber" style="margin:10px 0 0;">
+                  <p><strong>呼应 Frida 注入原理：</strong>这就是为什么 <a href="frida-inject-guide.html">《Frida 17 注入原理》动作 6</a> 里，匿名 RWX 页里的 <code>loader.c</code> 调 <code>__loader_dlopen</code> 时，必须把第 3 个参数 <code>caller_addr</code> 伪装成 <code>libc-&gt;close</code> 地址——因为匿名页不属于任何 <code>soinfo</code>，不伪装就会立刻被 Namespace 拦截；伪装成 <code>libc.so</code> 里的地址就合法借用了系统 <code>default</code> 命名空间！</p>
+                </div>
+              </div>
+            </article>
+
+            <!-- Step 2 -->
+            <article class="dl-card">
+              <div class="dl-head">
+                <div class="dl-head-left">
+                  <span class="dl-num">2</span>
+                  <h4>查全局 <code>solist</code> 缓存与打开文件</h4>
+                </div>
+                <span class="dl-src">linker.cpp::find_libraries() → load_library()</span>
+              </div>
+              <div class="dl-body">
+                <p>先在当前 Namespace 已加载的 <code>soinfo</code> 列表中查找同名库（或同一 inode 的文件）：</p>
+                <ul>
+                  <li><strong>如果已经加载过</strong>：直接把 <code>ref_count++</code> 并返回已有句柄，<strong>不会重复映射内存、也不会再次执行 <code>.init_array</code></strong>（这也是 Frida 预加载 <code>liblog.so</code> 时几乎零开销的原因）。</li>
+                  <li><strong>如果尚未加载</strong>：按当前 Namespace 的搜索路径（如 App 的 <code>lib/arm64</code>、<code>/system/lib64</code>）找到文件并 <code>open()</code> 拿到 FD（若是 Android APK 里未解压的 <code>.so</code>，还支持直接从 ZIP 偏移 <code>p_offset</code> 映射）。</li>
+                </ul>
+              </div>
+            </article>
+
+            <!-- Step 3 -->
+            <article id="s-load" class="dl-card teal">
+              <div class="dl-head">
+                <div class="dl-head-left">
+                  <span class="dl-num">3</span>
+                  <h4><code>ElfReader::Load()</code>：预留连续地址并映射 <code>PT_LOAD</code> 段</h4>
+                </div>
+                <span class="dl-src">linker_phdr.cpp::ElfReader::Load()</span>
+              </div>
+              <div class="dl-body">
+                <p>这是“磁盘 ELF 变成内存 ELF”的物理动作，一共三小步：</p>
+                <ol>
+                  <li><strong>算总跨度并 <code>ReserveAddressSpace()</code></strong>：遍历所有 <code>PT_LOAD</code> 算出最低虚拟地址 <code>min_vaddr</code> 和最高虚拟地址 <code>max_vaddr</code>，用 <code>mmap(NULL, max_vaddr - min_vaddr, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)</code> 一次性向内核圈出一整块连续虚拟地址，从而算出 <strong><code>load_bias = base - min_vaddr</code></strong>（保证各段之间的相对距离与编译期完全一致，PC 相对寻址指令才不会错！）。</li>
+                  <li><strong>逐段 <code>LoadSegments()</code></strong>：对每个 <code>PT_LOAD</code>，用 <code>mmap(seg_page_start, ..., MAP_FIXED, fd, file_page_start)</code> 把磁盘内容精准贴到预留区间内的对应位置，按 <code>PF_R/W/X</code> 设置权限；遇到 <code>p_memsz &gt; p_filesz</code> 时把 <code>.bss</code> 尾部清零并补齐匿名零页。</li>
+                  <li><strong><code>FindPhdr()</code></strong>：记录内存里的 Program Header 地址，为后面解析 <code>PT_DYNAMIC</code> 做准备。</li>
+                </ol>
+              </div>
+            </article>
+
+            <!-- Step 4 -->
+            <article class="dl-card">
+              <div class="dl-head">
+                <div class="dl-head-left">
+                  <span class="dl-num">4</span>
+                  <h4>解析 <code>PT_DYNAMIC</code> 并递归加载 <code>DT_NEEDED</code> 依赖树</h4>
+                </div>
+                <span class="dl-src">linker.cpp::soinfo::prelink_image()</span>
+              </div>
+              <div class="dl-body">
+                <p><code>prelink_image()</code> 遍历内存中的 <code>PT_DYNAMIC</code> 数组，把后续重定位需要的表地址全提出来放进 <code>soinfo</code> 结构体（<code>DT_SYMTAB</code> 符号表、<code>DT_STRTAB</code> 字符串表、<code>DT_GNU_HASH</code> 哈希表、<code>DT_RELA</code> / <code>DT_JMPREL</code> 重定位表、<code>DT_INIT_ARRAY</code> 构造函数表）。</p>
+                <p>同时收集所有 <code>DT_NEEDED</code> 依赖库名（例如 <code>liblog.so</code>、<code>libc.so</code>），以<strong>广度优先</strong>顺序把整棵依赖树先全部完成步骤 2 和步骤 3，确保接下来查外部符号时，所有依赖库都已经在内存里就位了。</p>
+              </div>
+            </article>
+
+            <!-- Step 5 -->
+            <article id="s-reloc" class="dl-card violet">
+              <div class="dl-head">
+                <div class="dl-head-left">
+                  <span class="dl-num">5</span>
+                  <h4>重定位（Relocation）“填满 GOT 表” + <code>GNU_RELRO</code> 锁只读</h4>
+                </div>
+                <span class="dl-src">linker_relocate.cpp::soinfo::relocate()</span>
+              </div>
+              <div class="dl-body">
+                <p>这是动态链接最核心的“填空”环节。在 ARM64（AArch64）上，每条重定位记录 <code>Elf64_Rela</code> 只有 3 个字段：<strong>要改哪里的偏移 <code>r_offset</code></strong>、<strong>重定位类型与符号索引 <code>r_info</code></strong>、<strong>加数 <code>r_addend</code></strong>。最常见的 3 种填空公式如下：</p>
+
+                <figure class="codeblock">
+                  <div class="code-head">
+                    <span>ARM64 (AArch64) 最核心的 3 种重定位填空公式</span>
+                  </div>
+                  <pre><span class="cc">// 要填写的目标内存地址 = load_bias + rela.r_offset</span>
+<span class="ck">uint64_t*</span> target = (<span class="ck">uint64_t*</span>)(load_bias + rela.r_offset);
+
+<span class="cc">// ① R_AARCH64_RELATIVE (1027)：库内指针修正（无需查符号名，如全局函数指针、虚表、init_array）</span>
+*target = <span class="cs">load_bias + rela.r_addend</span>;
+
+<span class="cc">// ② R_AARCH64_GLOB_DAT (1025)：全局数据/函数地址（去依赖库 .dynsym 查符号真实地址 S，填入 .got）</span>
+*target = <span class="cs">lookup_symbol(sym_name) + rela.r_addend</span>;
+
+<span class="cc">// ③ R_AARCH64_JUMP_SLOT (1026)：外部函数调用（如 __android_log_print，填入 .got.plt 槽位）</span>
+<span class="cc">//    注：现代 Android 默认开启 BIND_NOW / Full RELRO，加载时即刻全部填完，不再懒绑定！</span>
+*target = <span class="cs">lookup_symbol(sym_name)</span>;</pre>
+                </figure>
+
+                <p><strong>紧接着执行 <code>ApplyGnuRelro()</code>：</strong>全部重定位填完后，<code>linker64</code> 立刻调用 <code>mprotect(relro_start, relro_size, PROT_READ)</code> 把 <code>PT_GNU_RELRO</code> 覆盖的 <code>.got</code>、<code>.dynamic</code>、<code>.init_array</code> 全部锁成<strong>只读</strong>，防止运行期被内存漏洞随意改写 GOT 表！</p>
+              </div>
+            </article>
+
+            <!-- Step 6 -->
+            <article id="s-soinfo" class="dl-card amber">
+              <div class="dl-head">
+                <div class="dl-head-left">
+                  <span class="dl-num">6</span>
+                  <h4>登记全局 <code>soinfo</code> 账本 + 按依赖顺序执行 <code>.init_array</code></h4>
+                </div>
+                <span class="dl-src">linker.cpp::soinfo::call_constructors()</span>
+              </div>
+              <div class="dl-body">
+                <p>链接完成后，新创建的 <code>soinfo</code> 结构体已经稳稳挂在 <code>linker64</code> 的全局链表 <code>solist</code> 中（记录着文件名、<code>load_bias</code>、<code>phdr</code>、符号表指针等全部信息——<strong>这就是风控调用 <code>dl_iterate_phdr()</code> 时遍历的账本！</strong>）。</p>
+                <p>最后，<code>call_constructors()</code> 遵循<strong>“先依赖库、后自己”</strong>的顺序，依次执行 <code>DT_INIT</code> 和 <code>DT_INIT_ARRAY</code> 里的每一个初始化函数（C++ 全局对象构造、<code>__attribute__((constructor))</code> 函数都在这里运行）。全部跑完后，<code>dlopen()</code> 把句柄返回给调用方！</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- ==================== 06 INTERACTIVE WALKTHROUGH ==================== -->
+        <section id="walkthrough" class="chapter">
+          <p class="chapter-kicker">06 / Interactive Walkthrough</p>
+          <h2>6 步交互演示：亲眼看 <code>libdemo.so</code> 从磁盘变成可执行内存</h2>
+          <p class="lead">点击<strong>播放</strong>或左侧任意一步，假设 <code>libdemo.so</code> 内部调用了 <code>__android_log_print()</code> 并有一个 <code>__attribute__((constructor))</code>，实时观察进程内存、<code>.got</code> 槽位和 <code>linker64</code> 的 <code>soinfo</code> 账本如何变化：</p>
+
+          <section class="board" aria-label="Android dlopen 6 步加载链接交互演示">
+            <div class="board-toolbar">
+              <button type="button" id="btn-play">播放</button>
+              <button type="button" id="btn-prev">上一步</button>
+              <button type="button" id="btn-next">下一步</button>
+              <button type="button" id="btn-reset">重置</button>
+              <output id="step-progress" aria-live="polite">第 1 / 6 步</output>
+            </div>
+
+            <div class="board-grid">
+              <div class="board-steps">
+                <h3 class="board-col-title">dlopen("libdemo.so") 控制流</h3>
+                <ol class="step-list" id="step-list">
+                  <li><button type="button" class="step-btn" aria-current="step"><b>1. 校验 Namespace 与查 <code>solist</code> 缓存</b><span class="subline">__loader_dlopen(name, flags, caller_addr)</span></button></li>
+                  <li><button type="button" class="step-btn"><b>2. <code>ReserveAddressSpace</code> 圈地算 <code>load_bias</code></b><span class="subline">mmap(PROT_NONE, 0x6000) → base = 0x7b40_0000</span></button></li>
+                  <li><button type="button" class="step-btn"><b>3. 按 <code>PT_LOAD</code> 贴入各段并清零 <code>.bss</code></b><span class="subline">R-- / R-X / RW- 分页映射，Shdr 不加载</span></button></li>
+                  <li><button type="button" class="step-btn"><b>4. 解析 <code>PT_DYNAMIC</code>，先加载 <code>DT_NEEDED</code></b><span class="subline">确认 liblog.so / libc.so 已在内存中就位</span></button></li>
+                  <li><button type="button" class="step-btn"><b>5. 遍历 <code>.rela.*</code> 填满 <code>.got</code> + RELRO 锁只读</b><span class="subline">RELATIVE / JUMP_SLOT 填空 → mprotect(R--)</span></button></li>
+                  <li><button type="button" class="step-btn"><b>6. 登记 <code>soinfo</code> 账本并执行 <code>.init_array</code></b><span class="subline">dl_iterate_phdr 可见 → 构造完成返回 handle</span></button></li>
+                  <li class="step-token" id="step-token" aria-hidden="true" hidden></li>
+                </ol>
+              </div>
+
+              <aside class="board-state" aria-label="进程内存、GOT 与 soinfo 实时状态">
+                <h3 class="board-col-title">目标进程内部状态</h3>
+
+                <div class="state-box" id="box-mem">
+                  <div class="state-box-head"><span>虚拟内存映射（<code>/proc/pid/maps</code>）</span><span id="mem-badge">尚未映射</span></div>
+                  <dl>
+                    <div id="st-bias"><dt>load_bias / 虚拟区间</dt><dd></dd></div>
+                    <div id="st-segs"><dt>PT_LOAD 权限页 &amp; .bss</dt><dd></dd></div>
+                  </dl>
+                </div>
+
+                <div class="state-box" id="box-got">
+                  <div class="state-box-head"><span>数据段里的 <code>.got</code> 填空槽（<code>0x7b40_3080</code>）</span><span id="got-badge">未映射</span></div>
+                  <dl>
+                    <div id="st-got-rel"><dt>g_callback (R_AARCH64_RELATIVE)</dt><dd></dd></div>
+                    <div id="st-got-log"><dt>__android_log_print (JUMP_SLOT)</dt><dd></dd></div>
+                  </dl>
+                </div>
+
+                <div class="state-box" id="box-soinfo">
+                  <div class="state-box-head"><span><code>linker64</code> 全局 <code>soinfo</code> 账本</span><span id="soinfo-badge">未登记</span></div>
+                  <dl>
+                    <div id="st-solist"><dt>solist / dl_iterate_phdr()</dt><dd></dd></div>
+                    <div id="st-init"><dt>.init_array 构造函数</dt><dd></dd></div>
+                  </dl>
+                </div>
+              </aside>
+            </div>
+
+            <div class="board-annotation" aria-live="polite" aria-atomic="true">
+              <h3 id="ann-title"></h3>
+              <p id="ann-text"></p>
+              <pre class="board-code"><code id="ann-code"></code></pre>
+            </div>
+          </section>
+        </section>
+
+        <!-- ==================== 07 ANTI-DETECT & NEXT ==================== -->
+        <section id="anti-detect" class="chapter">
+          <p class="chapter-kicker">07 / Security Perspective &amp; Next</p>
+          <h2>风控视角回看：为什么标准 <code>dlopen</code> 藏不住注入的 <code>.so</code>？</h2>
+          <p class="lead">走完上面 6 步，就能一眼看出安全风控/反注入SDK为什么能轻松抓出通过系统 <code>dlopen()</code> 注入的 <code>.so</code>——几乎每一步都留下了公开可查的痕迹：</p>
+
+          <div class="grid-2">
+            <article class="mini-card">
+              <span class="kicker">TRACE 01 · soinfo 账本</span>
+              <h4><code>dl_iterate_phdr()</code> 一秒查全表</h4>
+              <p>标准 <code>dlopen</code> 第 6 步会把新库挂进 <code>linker64</code> 的全局 <code>solist</code>。App 只要调用标准 C 函数 <code>dl_iterate_phdr()</code>，就能直接拿到进程里所有已登记 <code>.so</code> 的名字、基址和 Program Header。</p>
+            </article>
+            <article class="mini-card">
+              <span class="kicker">TRACE 02 · /proc/self/maps 文件路径</span>
+              <h4>文件映射自带路径名</h4>
+              <p><code>ElfReader</code> 对文件 FD 执行 <code>mmap</code> 时，Linux 内核会在 <code>/proc/self/maps</code> 里清清楚楚标出文件路径（如 <code>/data/local/tmp/libevil.so</code> 或 <code>/memfd:...</code>）。</p>
+            </article>
+            <article class="mini-card">
+              <span class="kicker">TRACE 03 · Linker Namespace 拦截</span>
+              <h4>跨命名空间调用直接拒载</h4>
+              <p>Android 7+ 限制普通 App 的 <code>classloader-namespace</code> 不能直接 <code>dlopen</code> 非公开系统库或外部目录，逼得注入器必须伪造 <code>caller_addr</code>（如 <code>libc-&gt;close</code>）。</p>
+            </article>
+            <article class="mini-card">
+              <span class="kicker">TRACE 04 · 死锁与调试器通知</span>
+              <h4>全局锁 + <code>r_debug</code> 通知</h4>
+              <p><code>linker64</code> 内部维护全局互斥锁 <code>g_dl_mutex</code>，在 <code>ptrace</code> 暂停期间直调极易死锁；同时每次 <code>dlopen</code> 还会触发 <code>rtld_db_dlactivity()</code> 通知外部监控。</p>
+            </article>
+          </div>
+
+          <div class="callout teal">
+            <p><strong>把知识串成闭环：</strong>正因为 <code>dlopen()</code> 本质上就是「<strong>① 映射 <code>PT_LOAD</code> + 清 <code>.bss</code> → ② 加载依赖 → ③ 算重定位填 GOT → ④ 登记 <code>soinfo</code> → ⑤ 调 <code>.init_array</code></strong>」，如果我们自己把 ①②③⑤ 写了、<strong>唯独跳过第 ④ 步“登记 <code>soinfo</code>”</strong>，我们就亲手造出了一个像 Frida 17 <code>HAVE_MAPPER</code> 一样的<strong>微型无痕 Linker</strong>！</p>
+          </div>
+
+          <h3>AOSP 源码与延伸索引</h3>
+          <div class="index-box">
+            <ul>
+              <li><strong>AOSP <code>bionic/linker</code> 核心入口</strong>：<a href="https://android.googlesource.com/platform/bionic/+/refs/heads/main/linker/dlfcn.cpp">dlfcn.cpp（__loader_dlopen）</a> · <a href="https://android.googlesource.com/platform/bionic/+/refs/heads/main/linker/linker.cpp">linker.cpp（do_dlopen / find_libraries / call_constructors）</a></li>
+              <li><strong>ELF 段映射与重定位实现</strong>：<a href="https://android.googlesource.com/platform/bionic/+/refs/heads/main/linker/linker_phdr.cpp">linker_phdr.cpp（ElfReader / ReserveAddressSpace / LoadSegments）</a> · <a href="https://android.googlesource.com/platform/bionic/+/refs/heads/main/linker/linker_relocate.cpp">linker_relocate.cpp（relocate）</a></li>
+              <li><strong>同系列上下游文档</strong>：<a href="index.html">文档总索引</a> · <a href="frida-inject-guide.html">第二篇：Frida 17 注入原理（动作 6 自映射对照）</a> · <a href="frida-selinux-guide.html">补充专题 A：SELinux 热补丁</a> · <a href="frida-dbus-guide.html">补充专题 B：D-Bus 通信</a></li>
+            </ul>
+          </div>
+
+          <div class="next-post">
+            <strong>下篇预告（补充专题 D · Linker 下篇）：《如何从零实现一个微型无痕 Linker？（对照 Frida 17 <code>Mapper</code>）》</strong><br>
+            看透系统 <code>dlopen</code> 后，下一篇直接动手：砍掉 <code>soinfo</code> 记账，逐行写出一个 ARM64 Android 微型 Linker（算跨度 <code>mmap</code> → 按页映射与 <code>.bss</code> 清零 → 借系统 <code>dlopen</code> 预加载清白依赖 → 手写 ARM64 重定位公式 → <strong><code>dc cvau / ic ivau</code> 刷 I-Cache</strong> → 手写 <code>mini_dlsym</code>），并 1:1 对照 Frida 17.27.5 的跨进程双端协作 <code>Frida.Mapper</code>！
+          </div>
+
+          <footer class="footer-note">
+            <span><a href="index.html">← 返回文档总索引</a> · <a href="frida-inject-guide.html">回到《Frida 17 注入原理》</a></span>
+            <span>Android Security Notes · 补充专题 C（ELF &amp; dlopen）</span>
+          </footer>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // 1. Sidebar Scroll-Spy
+    const tocLinks = [...document.querySelectorAll('#toc a')];
+    const trackedIds = ['static-vs-shared', 'elf-basics', 'compile-bridge', 'elf-dual-view', 'dlopen-steps', 'walkthrough', 'anti-detect'];
+    const sections = trackedIds.map(id => document.getElementById(id)).filter(Boolean);
+
+    function setActiveToc(id) {
+      tocLinks.forEach(a => {
+        const match = a.getAttribute('href') === '#' + id;
+        a.classList.toggle('active', match);
+        if (match) a.setAttribute('aria-current', 'location');
+        else a.removeAttribute('aria-current');
+      });
+    }
+    if ('IntersectionObserver' in window && sections.length) {
+      const visible = new Map();
+      const io = new IntersectionObserver(entries => {
+        for (const e of entries) visible.set(e.target.id, e.isIntersecting ? e.boundingClientRect.top : null);
+        let bestId = null, bestTop = Infinity;
+        for (const s of sections) {
+          const top = visible.get(s.id);
+          if (top !== null && top !== undefined && Math.abs(top) < bestTop) {
+            bestTop = Math.abs(top);
+            bestId = s.id;
+          }
+        }
+        if (bestId) setActiveToc(bestId);
+      }, { rootMargin: '-12% 0px -65% 0px', threshold: [0, 0.25] });
+      sections.forEach(s => io.observe(s));
+    }
+
+    // 2. Interactive 6-step dlopen walkthrough
+    const frames = [
+      {
+        title: '第 1 步 · 校验 Linker Namespace 并查 solist 缓存',
+        text: 'libdl.so 拿到调用者返回地址 caller_addr 传给 __loader_dlopen()。linker64 判定本次属于 App 的 classloader-namespace，检查全局 solist 发现 libdemo.so 尚未加载，于是按路径找到文件并 open() 拿到文件描述符 fd。',
+        code: '__loader_dlopen("libdemo.so", RTLD_NOW, caller_addr)\n→ namespace = get_caller_namespace(caller_addr)\n→ solist 未命中 → open("/data/app/.../libdemo.so") = fd(42)',
+        live: ['box-soinfo'],
+        changed: ['st-solist'],
+        badges: { mem: '尚未映射', got: '尚未映射', soinfo: '查询缓存' },
+        state: {
+          bias: '尚未向内核申请虚拟地址空间',
+          segs: '仅 open() 拿到磁盘文件 fd(42)',
+          gotRel: '尚未映射到内存',
+          gotLog: '尚未映射到内存',
+          solist: '[libc.so, liblog.so, libart.so, ...]（未找到 libdemo.so）',
+          init: '尚未执行'
+        }
+      },
+      {
+        title: '第 2 步 · ElfReader::ReserveAddressSpace() 圈出连续地址，确定 load_bias',
+        text: '读取 ELF Header 和 Program Header，算出所有 PT_LOAD 段的总虚拟跨度为 0x6000（24KB）。调一次 mmap(PROT_NONE, 0x6000) 向内核占坑，ASLR 返回随机首地址 0x7b40_0000，因为 min_vaddr = 0，所以 load_bias = 0x7b40_0000！',
+        code: 'mmap(NULL, 0x6000, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)\n→ base = 0x7b40_0000  |  load_bias = 0x7b40_0000 - 0x0 = 0x7b40_0000',
+        live: ['box-mem'],
+        changed: ['st-bias'],
+        badges: { mem: '已预留区间', got: 'PROT_NONE', soinfo: '待登记' },
+        state: {
+          bias: 'load_bias = 0x7b40_0000（预留区间 0x7b40_0000..0x7b40_6000）',
+          segs: '整块 24KB 暂为 PROT_NONE（占位，防其他线程插队）',
+          gotRel: '0x7b40_3080 尚未可读可写',
+          gotLog: '0x7b40_3088 尚未可读可写',
+          solist: '[libc.so, liblog.so, libart.so, ...]',
+          init: '尚未执行'
+        }
+      },
+      {
+        title: '第 3 步 · LoadSegments() 按 PT_LOAD 分页贴入文件并展开清零 .bss',
+        text: '对每个 PT_LOAD 调用 mmap(MAP_FIXED) 把磁盘内容映射到对应页：元数据页 R--、代码页 R-X、RELRO 与数据页先设 RW-；同时把 .data 后的 .bss（p_memsz - p_filesz）补齐匿名零页并清零。此时磁盘末尾的 Section Header Table 根本不进内存！',
+        code: '0x7b40_0000 [R--] ← file 0x0000 (Ehdr / Phdr / .dynsym / .rela.*)\n0x7b40_1000 [R-X] ← file 0x0c00 (.plt / .text)\n0x7b40_3000 [RW-] ← file 0x1e00 (.init_array / .dynamic / .got)\n0x7b40_4000 [RW-] ← file 0x2200 (.data) + 展开清零 .bss (0x4300..5900)',
+        live: ['box-mem', 'box-got'],
+        changed: ['st-segs', 'st-got-rel', 'st-got-log'],
+        badges: { mem: '已按页映射', got: 'RW- (待填空)', soinfo: '待登记' },
+        state: {
+          bias: 'load_bias = 0x7b40_0000（4 个 PT_LOAD 段已落地）',
+          segs: 'R-- (0x0000) | R-X (0x1000) | RW- (0x3000) | RW- .data+.bss (0x4000)',
+          gotRel: '0x0000_0000_0000_0000（磁盘初始空占位，addend=0x1140）',
+          gotLog: '0x0000_0000_0000_0000（尚未查到 liblog.so 中的地址）',
+          solist: '[libc.so, liblog.so, libart.so, ...]',
+          init: '尚未执行'
+        }
+      },
+      {
+        title: '第 4 步 · 解析 PT_DYNAMIC 并先递归加载 DT_NEEDED 依赖库',
+        text: 'prelink_image() 读出 PT_DYNAMIC 里的 .dynsym / .rela.dyn / .rela.plt / .init_array，并看到 DT_NEEDED 写着 "liblog.so" 与 "libc.so"。检查发现它们已在内存中（ref_count++ 复用），外部符号查找环境就绪！',
+        code: 'PT_DYNAMIC:\n  DT_NEEDED = ["liblog.so", "libc.so"]  → 已加载，ref_count++\n  DT_RELA   = 0x7b40_0800  |  DT_JMPREL = 0x7b40_0920',
+        live: ['box-soinfo'],
+        changed: ['st-solist'],
+        badges: { mem: '段已就位', got: 'RW- (待填空)', soinfo: '依赖就绪' },
+        state: {
+          bias: 'load_bias = 0x7b40_0000',
+          segs: '所有 PT_LOAD 已映射，PT_DYNAMIC 元数据解析完成',
+          gotRel: '0x0000_0000_0000_0000（准备填入 load_bias + 0x1140）',
+          gotLog: '0x0000_0000_0000_0000（准备从 liblog.so 查真实地址）',
+          solist: '确认依赖库 liblog.so (0x7c10_0000) 与 libc.so 已就位',
+          init: '已定位 .init_array = 0x7b40_3000'
+        }
+      },
+      {
+        title: '第 5 步 · 遍历重定位表填满 .got 槽位，随后 RELRO 锁死为只读',
+        text: '核心“填空”时刻！对 R_AARCH64_RELATIVE 直接写入 load_bias + 0x1140；对 R_AARCH64_JUMP_SLOT 从 liblog.so 符号表查出 __android_log_print = 0x7c10_5840 填入 .got！填完后立刻调用 mprotect(0x7b40_3000, 0x1000, PROT_READ) 把 RELRO 页锁成只读。',
+        code: '*(0x7b40_3080) = 0x7b40_0000 + 0x1140 = 0x7b40_1140  // RELATIVE\n*(0x7b40_3088) = dlsym(liblog, "__android_log_print") = 0x7c10_5840\nmprotect(0x7b40_3000, 0x1000, PROT_READ)              // GNU_RELRO 锁定！',
+        live: ['box-got', 'box-mem'],
+        changed: ['st-got-rel', 'st-got-log', 'st-segs'],
+        badges: { mem: 'RELRO 已锁定', got: '已填满并锁 R--', soinfo: '准备登记' },
+        state: {
+          bias: 'load_bias = 0x7b40_0000',
+          segs: '0x7b40_3000 权限已由 RW- 收紧为 R--（防运行期篡改 GOT）',
+          gotRel: '✅ 0x7b40_1140（已修正为库内真实回调地址）',
+          gotLog: '✅ 0x7c10_5840（已指向 liblog.so::__android_log_print）',
+          solist: '准备把 libdemo.so 的 soinfo 节点挂入全局链表',
+          init: '所有指针已就绪，可以安全运行初始化代码'
+        }
+      },
+      {
+        title: '第 6 步 · 挂入全局 soinfo 账本 + 执行 .init_array 构造函数',
+        text: 'libdemo.so 的 soinfo 正式挂进 linker64 全局 solist（此刻 dl_iterate_phdr() 就能查到它！）。接着 call_constructors() 执行 .init_array 中的构造函数，最后返回 handle 给调用方，整个 dlopen() 圆满完成！',
+        code: 'solist.append(soinfo("libdemo.so", base=0x7b40_0000))\ncall_constructors() → 执行 libdemo.so 的 __attribute__((constructor))\nreturn handle;  // 此时风控调 dl_iterate_phdr() 即可发现 libdemo.so',
+        live: ['box-soinfo'],
+        changed: ['st-solist', 'st-init'],
+        badges: { mem: '可执行就绪', got: 'R-- 只读保护', soinfo: '已登记可见' },
+        state: {
+          bias: 'load_bias = 0x7b40_0000（已完全可调用）',
+          segs: 'R-- | R-X | R--(RELRO) | RW-(.data/.bss)',
+          gotRel: '✅ 0x7b40_1140（只读保护）',
+          gotLog: '✅ 0x7c10_5840（只读保护）',
+          solist: '⚠ [..., libdemo.so @ 0x7b40_0000]（dl_iterate_phdr 可见！）',
+          init: '✅ .init_array 构造函数已执行完毕，返回 handle'
+        }
+      }
+    ];
+
+    const byId = id => document.getElementById(id);
+    const stepList = byId('step-list');
+    const stepButtons = [...stepList.querySelectorAll('.step-btn')];
+    const token = byId('step-token');
+    const btnPlay = byId('btn-play');
+    const btnPrev = byId('btn-prev');
+    const btnNext = byId('btn-next');
+    const btnReset = byId('btn-reset');
+
+    let step = 0;
+    let timer = null;
+
+    function positionToken(animate) {
+      const outer = stepList.getBoundingClientRect();
+      const target = stepButtons[step].getBoundingClientRect();
+      token.classList.toggle('moving', animate);
+      token.style.transform = `translateY(${target.top - outer.top + (target.height - 12) / 2}px)`;
+      token.hidden = false;
+    }
+
+    function render(animate = true) {
+      const f = frames[step];
+      stepButtons.forEach((btn, i) => {
+        if (i === step) btn.setAttribute('aria-current', 'step');
+        else btn.removeAttribute('aria-current');
+      });
+      ['box-mem', 'box-got', 'box-soinfo'].forEach(id => {
+        byId(id).classList.toggle('live', f.live.includes(id));
+      });
+      byId('mem-badge').textContent = f.badges.mem;
+      byId('got-badge').textContent = f.badges.got;
+      byId('soinfo-badge').textContent = f.badges.soinfo;
+
+      const map = {
+        'st-bias': f.state.bias,
+        'st-segs': f.state.segs,
+        'st-got-rel': f.state.gotRel,
+        'st-got-log': f.state.gotLog,
+        'st-solist': f.state.solist,
+        'st-init': f.state.init
+      };
+      for (const [id, val] of Object.entries(map)) {
+        const row = byId(id);
+        row.querySelector('dd').textContent = val;
+        row.classList.toggle('changed', f.changed.includes(id));
+      }
+
+      byId('ann-title').textContent = f.title;
+      byId('ann-text').textContent = f.text;
+      byId('ann-code').textContent = f.code;
+      byId('step-progress').textContent = `第 ${step + 1} / ${frames.length} 步`;
+      btnPrev.disabled = step === 0;
+      btnNext.disabled = step === frames.length - 1;
+      btnPlay.textContent = timer !== null ? '暂停' : step === frames.length - 1 ? '重播' : '播放';
+      positionToken(animate);
+    }
+
+    function stop() {
+      if (timer !== null) { clearInterval(timer); timer = null; }
+    }
+    function seek(next) {
+      stop();
+      step = Math.max(0, Math.min(frames.length - 1, next));
+      render(true);
+    }
+    btnPlay.addEventListener('click', () => {
+      if (timer !== null) { stop(); render(false); return; }
+      if (step === frames.length - 1) step = 0;
+      timer = setInterval(() => {
+        step++;
+        if (step === frames.length - 1) stop();
+        render(true);
+      }, 2800);
+      render(true);
+    });
+    btnPrev.addEventListener('click', () => seek(step - 1));
+    btnNext.addEventListener('click', () => seek(step + 1));
+    btnReset.addEventListener('click', () => seek(0));
+    stepButtons.forEach((btn, i) => btn.addEventListener('click', () => seek(i)));
+    if ('ResizeObserver' in window) new ResizeObserver(() => positionToken(false)).observe(stepList);
+    else window.addEventListener('resize', () => positionToken(false));
+
+    render(false);
+  </script>
+</body>
+</html>
