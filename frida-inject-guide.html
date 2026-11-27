@@ -1835,15 +1835,41 @@
 
           <figure class="selinux-viz" aria-label="动作 6 Frida 17 默认自映射 frida_map_agent 四步曲与传统 dlopen 回退对比">
             <div class="selinux-viz-head">
-              <strong>图 7 · 【动作 6 细节展开】Frida 17 为什么要自己实现一套加载器绕过系统 <code>dlopen</code>？自映射 4 步曲是怎么跑的？</strong>
+              <strong>图 7 · 【动作 6 细节展开】为什么不用系统的 <code>dlopen</code> 加载 <code>frida-agent.so</code>，而要自己做内存映射？</strong>
               <span class="muted"><code>loader.c::frida_map_agent</code> (L225–367)</span>
             </div>
-            <div class="selinux-viz-body" style="display:grid;gap:12px;">
+            <div class="selinux-viz-body" style="display:grid;gap:14px;">
+              <!-- 两个灵魂疑问：为什么不用 dlopen？那为什么动作 3 还要搜 dlopen？ -->
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:12px;">
+                <div style="padding:14px 16px;border:1px solid var(--line);border-top:3px solid var(--amber);border-radius:9px;background:#fffdf9;">
+                  <div style="font:700 12px var(--mono);color:var(--amber);margin-bottom:4px;">核心疑问 ① · 好端端的系统 dlopen 不用，为什么自己做内存映射？</div>
+                  <div style="font-weight:700;font-size:15px;color:var(--ink);margin-bottom:6px;">为了逃避风控扫描 Android 系统 <code>linker64</code> 的 <code>soinfo</code> 账本！</div>
+                  <p style="margin:0;font-size:13.3px;color:var(--sub);line-height:1.65;">
+                    系统的 <code>dlopen()</code> 本质上就干 <strong>4 件事</strong>：<br>
+                    1. <strong>映射内存</strong>（读 ELF 头，调 <code>mmap</code> 把代码段和数据段映射进内存）；<br>
+                    2. <strong>算重定位</strong>（算出内部各个函数和变量的真实内存地址）；<br>
+                    3. <strong style="color:#a61e1e;">【最致命】登记系统账本</strong>（把新加载的 <code>.so</code> 挂进 Android <code>linker64</code> 的全局 <code>soinfo</code> 链表——目标 App 的风控只要调标准函数 <code>dl_iterate_phdr()</code> 查一下账本，当场就能抓出 <code>frida-agent.so</code>！）；<br>
+                    4. <strong>调构造函数</strong>（执行 <code>init_array</code> 初始化函数）。<br>
+                    <strong>Frida 17 的绝招</strong>：干脆对 <code>frida-agent.so</code> <strong>不调系统 <code>dlopen</code></strong>（直接跳过第 3 步记账！），而把第 1、2、4 步拆给<strong>目标后台线程</strong>和<strong>外面的 <code>frida-server</code></strong> 自己配合干完（相当于自己实现了一个微型无痕 Linker）！
+                  </p>
+                </div>
+
+                <div style="padding:14px 16px;border:1px solid var(--line);border-top:3px solid var(--blue);border-radius:9px;background:#f8fbff;">
+                  <div style="font:700 12px var(--mono);color:var(--blue);margin-bottom:4px;">核心疑问 ② · 既然不用 dlopen 加载 agent.so，为什么动作 3 还要搜 dlopen 地址？</div>
+                  <div style="font-weight:700;font-size:15px;color:var(--ink);margin-bottom:6px;">因为“正规系统依赖库”和“旧模式回退”依然要用系统 <code>dlopen</code>！</div>
+                  <p style="margin:0;font-size:13.3px;color:var(--sub);line-height:1.65;">
+                    动作 3 辛辛苦苦搜出来的 <code>__loader_dlopen</code> 在这里有两个关键用途：<br>
+                    1. <strong>加载 <code>frida-agent.so</code> 依赖的“正规清白系统库”（如 <code>liblog.so</code>、<code>libm.so</code>）</strong>：<code>frida-agent.so</code> 运行时需要调系统的日志和数学库。这些系统库本身是合法的、不怕被查账本，所以后台线程会先调系统的 <code>dlopen("liblog.so")</code> 把它们正常加载进来（见下方第 ① 步 <code>frida_load_dependency</code>）；<strong>唯独对 <code>frida-agent.so</code> 这个“黑户”本身，绝不调 <code>dlopen</code>，而是自己用 <code>mmap</code> 偷偷映射！</strong><br>
+                    2. <strong>给关闭自映射的环境留回退路（Fallback）</strong>：若编译时指定了 <code>-Dmapper=disabled</code>（<code>agent_mapped == 0</code>），代码就会退回老做法，调 <code>__loader_dlopen("/proc/%d/fd/%d")</code> 加载 <code>agent.so</code>。
+                  </p>
+                </div>
+              </div>
+
               <!-- 细节 6.1：路径 A 默认自映射 4 步曲 -->
               <div style="padding:14px 16px;border:1px solid var(--line);border-top:3px solid var(--teal);border-radius:9px;background:#f4fbf9;">
-                <div style="font:700 12px var(--mono);color:var(--teal);margin-bottom:4px;">细节 6.1 · 路径 A（Frida 17 默认开启 HAVE_MAPPER = 1）：用户态自映射 frida_map_agent()</div>
+                <div style="font:700 12px var(--mono);color:var(--teal);margin-bottom:4px;">细节 6.1 · 路径 A（Frida 17 默认开启 HAVE_MAPPER = 1）：自映射 4 步曲是怎么替掉 dlopen 的？</div>
                 <div style="font-weight:700;font-size:15px;color:var(--ink);margin-bottom:6px;">
-                  核心动机：只要调系统的 <code>dlopen</code>，Android <code>linker64</code> 就会把 <code>frida-agent.so</code> 登记进全局 <code>soinfo</code> 链表（风控调 <code>dl_iterate_phdr</code> 一扫就暴露）。Frida 17 干脆把 ELF 解析和重定位放在 <code>frida-server</code> 里算好，让目标后台线程只按指令做 4 步纯内存拼装：
+                  <code>frida-server</code> 在进程外负责算重定位，目标 App 后台线程在进程内只按指令做 4 步纯内存拼装：
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px;">
                   <div style="padding:10px 12px;border:1px solid #bfe4d8;border-radius:7px;background:#fff;">
