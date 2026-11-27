@@ -259,8 +259,18 @@
             <span class="tag">ELF &amp; dlopen</span>
           </div>
           <h3>Android dlopen 是如何加载并链接一个 .so 的？</h3>
-          <p>打通编译链接期与运行期交接，双栏对比磁盘 ELF 与内存 ELF 格式差异，逐层拆解 bionic/linker64 的 6 步加载、GOT 重定位、RELRO 与 soinfo 账本。</p>
+          <p>从静态库/动态库动手制作讲起，拆解 ELF 与 PT_LOAD、.dynamic 四表协作、ASLR、磁盘/内存双视图与 bionic/linker64 的 6 步加载重定位全流程。</p>
           <div class="card-foot"><span class="file">android-dlopen-linker.html</span><span>阅读 →</span></div>
+        </a>
+
+        <a class="card" href="elf-build-animation.html">
+          <div class="tags">
+            <span class="tag teal">交互动画</span>
+            <span class="tag">.c → .o → .so</span>
+          </div>
+          <h3>ELF 是怎么诞生的？.c → .o → .so 编译链接 8 步动画</h3>
+          <p>用 foo.c + bar.c 双文件实战演示预处理、编译汇编、.o 填 0 占坑，到 lld 合并 Section、内部调用填死、外部调用甩进 GOT/PLT 并打包 PT_LOAD 出厂。</p>
+          <div class="card-foot"><span class="file">elf-build-animation.html</span><span>打开动画 →</span></div>
         </a>
       </div>
     </section>

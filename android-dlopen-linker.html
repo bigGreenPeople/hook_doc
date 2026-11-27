@@ -992,7 +992,7 @@ clang main.c -L. -lmath_util -o app_dynamic
 
           <div class="callout">
             <p><strong>动手完，自然冒出三个核心问题：</strong><br>
-            ① 刚才一行 <code>clang -fPIC -shared</code> 造出来的 <code>libmath_util.so</code>，打开看里面的二进制到底长什么格式？（→ 见 <strong>02 · 先认识 ELF</strong>）<br>
+            ① 刚才一行 <code>clang -fPIC -shared</code> 造出来的 <code>libmath_util.so</code>，打开看里面的二进制到底长什么格式？（→ 见 <strong>02 · 先认识 ELF</strong>，或者直接看配套 8 步动画：<a href="elf-build-animation.html"><strong>《ELF 是怎么诞生的？.c → .o → .so 交互动画》↗</strong></a>）<br>
             ② 制作动态库时，为什么必须加上 <code>-fPIC</code> 这个参数？（→ 见 <strong>03 · 编译链接与 ASLR</strong>）<br>
             ③ 当我们在程序里调用 <code>dlopen("libmath_util.so", RTLD_NOW)</code> 时，Android 的 <code>linker64</code> 怎么把这个文件变成内存里能直接执行的函数？（→ 见 <strong>04～06 章</strong>）</p>
           </div>

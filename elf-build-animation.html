@@ -1,0 +1,1078 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ELF 是怎么诞生的？.c → .o → .so 编译链接全过程交互动画｜Android Security Notes</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3f6fb;
+      --paper: #ffffff;
+      --ink: #162338;
+      --sub: #4b5d75;
+      --muted: #687a93;
+      --line: #d4dfec;
+      --line-soft: #e6ecf5;
+      --blue: #224b94;
+      --blue-strong: #183770;
+      --blue-soft: #e9f0fd;
+      --teal: #0e6b5c;
+      --teal-soft: #e6f6f1;
+      --amber: #b45318;
+      --amber-soft: #fff2e8;
+      --violet: #5b3b9c;
+      --violet-soft: #f2ecfe;
+      --red: #a61e1e;
+      --red-soft: #fdecec;
+      --code-bg: #111e30;
+      --code-ink: #eaf1fb;
+      --mono: "Cascadia Code", Consolas, ui-monospace, SFMono-Regular, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15.5px/1.7 var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--blue); text-underline-offset: 3px; }
+    a:hover { color: var(--blue-strong); }
+    code, pre { font-family: var(--mono); }
+    code {
+      font-size: 0.88em;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #edf2fa;
+      color: #163055;
+      overflow-wrap: anywhere;
+    }
+    pre code { padding: 0; background: transparent; color: inherit; }
+    :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+    /* Top Header */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--line);
+    }
+    .topbar-inner {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 10px 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .nav-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      font-size: 12.8px;
+      font-weight: 600;
+      text-decoration: none;
+      color: var(--sub);
+    }
+    .nav-pill:hover { border-color: var(--blue); color: var(--blue-strong); background: var(--blue-soft); }
+    .topbar h1 { margin: 0; font-size: 16.5px; line-height: 1.3; }
+
+    /* Main wrap */
+    .wrap {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 24px 22px 56px;
+    }
+
+    /* Intro strip */
+    .intro {
+      margin-bottom: 18px;
+      padding: 16px 20px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--paper);
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+      gap: 16px;
+      align-items: center;
+    }
+    .intro-kicker {
+      display: inline-block;
+      margin-bottom: 6px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: var(--blue-soft);
+      color: var(--blue-strong);
+      font: 700 11.5px var(--mono);
+    }
+    .intro h2 {
+      margin: 0 0 6px;
+      font-size: clamp(22px, 3vw, 28px);
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+    }
+    .intro p { margin: 0; font-size: 14.2px; color: var(--sub); }
+
+    .src-preview {
+      border: 1px solid #20344f;
+      border-radius: 9px;
+      overflow: hidden;
+      background: var(--code-bg);
+      color: var(--code-ink);
+    }
+    .src-preview-head {
+      padding: 6px 12px;
+      background: #1a2c44;
+      border-bottom: 1px solid #29405f;
+      font: 600 11.5px var(--mono);
+      color: #a9c5e8;
+      display: flex;
+      justify-content: space-between;
+    }
+    .src-preview pre {
+      margin: 0;
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.55;
+      overflow-x: auto;
+    }
+    .ck { color: #8ec1ff; font-weight: 700; }
+    .cs { color: #7ae2b8; }
+    .cw { color: #ffd08a; }
+    .cc { color: #7e97b8; }
+
+    /* Pipeline ribbon */
+    .ribbon {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .rib-node {
+      padding: 9px 11px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--paper);
+      font-size: 12.5px;
+      transition: border-color 0.2s, background 0.2s, transform 0.2s, box-shadow 0.2s;
+    }
+    .rib-node.active {
+      border-color: var(--blue);
+      background: var(--blue-soft);
+      box-shadow: 0 0 0 2px rgba(34, 75, 148, 0.14);
+      transform: translateY(-1px);
+    }
+    .rib-node.done {
+      border-color: #a5d8cb;
+      background: var(--teal-soft);
+    }
+    .rib-node .r-phase {
+      display: block;
+      font: 700 10.5px var(--mono);
+      color: var(--muted);
+    }
+    .rib-node.active .r-phase { color: var(--blue); }
+    .rib-node.done .r-phase { color: var(--teal); }
+    .rib-node b { display: block; font-size: 13.5px; color: var(--ink); }
+    .rib-node span { display: block; font-size: 11.8px; color: var(--sub); }
+
+    /* Main interactive board */
+    .board {
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: var(--paper);
+      overflow: hidden;
+      box-shadow: 0 4px 18px rgba(22, 35, 56, 0.06);
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      background: #f7fafe;
+      border-bottom: 1px solid var(--line);
+    }
+    .toolbar button {
+      cursor: pointer;
+      min-height: 36px;
+      padding: 5px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      font: 600 13.5px var(--sans);
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .toolbar button:hover:not(:disabled) { background: #edf3fb; border-color: #adc1e0; }
+    .toolbar button:disabled { opacity: 0.45; cursor: default; }
+    #btn-play {
+      min-width: 78px;
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
+    #btn-play:hover { background: var(--blue-strong); }
+    .phase-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-left: 6px;
+    }
+    .phase-group button {
+      min-height: 30px;
+      padding: 4px 11px;
+      border-radius: 999px;
+      font-size: 12.5px;
+    }
+    .phase-group button.is-phase {
+      background: var(--blue-soft);
+      border-color: var(--blue);
+      color: var(--blue-strong);
+    }
+    .phase-group button.is-phase.p2 {
+      background: var(--teal-soft);
+      border-color: var(--teal);
+      color: var(--teal);
+    }
+    #progress {
+      margin-left: auto;
+      font: 700 13px var(--mono);
+      color: var(--muted);
+    }
+
+    /* Two-column stage */
+    .stage {
+      display: grid;
+      grid-template-columns: 350px minmax(0, 1fr);
+    }
+    .steps-col {
+      padding: 16px 16px 18px;
+      border-right: 1px solid var(--line);
+      background: #fcfdff;
+    }
+    .col-label {
+      margin: 0 0 10px;
+      font: 700 12px var(--mono);
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    .phase-divider {
+      margin: 10px 0 8px -20px;
+      padding: 3px 9px;
+      border-radius: 5px;
+      background: #edf3fb;
+      color: var(--blue-strong);
+      font: 700 11.5px var(--mono);
+    }
+    .phase-divider.p2 {
+      background: var(--teal-soft);
+      color: var(--teal);
+      margin-top: 14px;
+    }
+    .step-list {
+      position: relative;
+      list-style: none;
+      margin: 0;
+      padding: 0 0 0 20px;
+    }
+    .step-list::before {
+      content: "";
+      position: absolute;
+      left: 5px;
+      top: 38px;
+      bottom: 22px;
+      border-left: 2px solid #c3d2e6;
+    }
+    .step-list li { position: relative; margin: 0 0 7px; }
+    .step-list > li:nth-last-child(2) { margin-bottom: 0; }
+    .step-btn {
+      display: block;
+      width: 100%;
+      cursor: pointer;
+      text-align: left;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .step-btn:hover { background: #f3f7fe; }
+    .step-btn[aria-current="step"] {
+      background: var(--blue-soft);
+      border-color: var(--blue);
+    }
+    .step-btn.p2[aria-current="step"] {
+      background: var(--teal-soft);
+      border-color: var(--teal);
+    }
+    .step-btn b { display: block; font-size: 13.3px; line-height: 1.38; }
+    .step-btn small {
+      display: block;
+      margin-top: 2px;
+      font: 11.5px/1.4 var(--mono);
+      color: var(--muted);
+    }
+    .step-btn[aria-current="step"] small { color: var(--blue-strong); }
+    .step-btn.p2[aria-current="step"] small { color: var(--teal); }
+    .step-token {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 0 4px #cfe0fd;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .step-token.p2 {
+      background: var(--teal);
+      box-shadow: 0 0 0 4px #c7ece2;
+    }
+    .step-token.moving { transition: transform 0.45s cubic-bezier(0.22, 0.72, 0.24, 1); }
+
+    /* Visual canvas right column */
+    .visual-col {
+      padding: 16px 18px 18px;
+      background: #f8fafd;
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+
+    /* Panel 1: Live Artifact / Code Transform */
+    .viz-panel {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      overflow: hidden;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .viz-panel.live {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 2px rgba(34, 75, 148, 0.1);
+    }
+    .viz-panel.live-teal {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 2px rgba(14, 107, 92, 0.12);
+    }
+    .viz-panel-head {
+      padding: 8px 12px;
+      background: #eef3fa;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .viz-panel.live .viz-panel-head { background: var(--blue-soft); color: var(--blue-strong); }
+    .viz-panel.live-teal .viz-panel-head { background: var(--teal-soft); color: var(--teal); }
+    .viz-badge {
+      font: 700 11px var(--mono);
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--sub);
+    }
+    .viz-panel-body { padding: 12px; }
+
+    .artifact-pre {
+      margin: 0;
+      padding: 11px 13px;
+      border-radius: 7px;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      font: 12.4px/1.62 var(--mono);
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+
+    /* Panel 2: Two Calls Fate Tracker (Internal vs External!) */
+    .fate-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .fate-card {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fafcff;
+      font-size: 12.6px;
+      line-height: 1.55;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .fate-card.resolved {
+      border-color: #9fd8c9;
+      background: var(--teal-soft);
+    }
+    .fate-card.deferred {
+      border-color: #efc4a0;
+      background: var(--amber-soft);
+    }
+    .fate-card.hole {
+      border-color: #e6b4b4;
+      background: var(--red-soft);
+    }
+    .fate-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+    .fate-head b { font: 700 12.8px var(--mono); color: var(--ink); }
+    .fate-tag {
+      padding: 1px 6px;
+      border-radius: 4px;
+      font: 700 10.8px var(--mono);
+      background: #e9f0fd;
+      color: var(--blue-strong);
+      white-space: nowrap;
+    }
+    .fate-card.resolved .fate-tag { background: #cdeee4; color: var(--teal); }
+    .fate-card.deferred .fate-tag { background: #fde2cc; color: var(--amber); }
+    .fate-card.hole .fate-tag { background: #f9d2d2; color: var(--red); }
+    .fate-card p { margin: 0; color: var(--sub); }
+    .fate-card code { font-size: 11.6px; }
+
+    /* Panel 3: ELF Block Assembler Grid */
+    .elf-slots {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .elf-slot {
+      padding: 8px 10px;
+      border: 1.5px dashed #cad6e6;
+      border-radius: 7px;
+      background: #f8fafd;
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--muted);
+      transition: all 0.25s;
+    }
+    .elf-slot b { display: block; font: 700 12.2px var(--mono); margin-bottom: 2px; }
+    .elf-slot.on {
+      border-style: solid;
+      border-color: #93b4e6;
+      background: var(--blue-soft);
+      color: var(--ink);
+    }
+    .elf-slot.on.teal {
+      border-color: #7ac7b5;
+      background: var(--teal-soft);
+    }
+    .elf-slot.on.amber {
+      border-color: #ebb78b;
+      background: var(--amber-soft);
+    }
+    .elf-slot.on.violet {
+      border-color: #baa2e8;
+      background: var(--violet-soft);
+    }
+    .elf-slot.just {
+      box-shadow: 0 0 0 2.5px rgba(34, 75, 148, 0.22);
+      transform: translateY(-1px);
+    }
+    .elf-slot.just.teal { box-shadow: 0 0 0 2.5px rgba(14, 107, 92, 0.24); }
+
+    /* Bottom annotation */
+    .annotation {
+      padding: 15px 18px 17px;
+      border-top: 1px solid var(--line);
+      background: #fff;
+    }
+    .ann-top {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .annotation h3 { margin: 0; font-size: 16.5px; }
+    .ann-cmd {
+      padding: 3px 9px;
+      border-radius: 5px;
+      background: #edf3fb;
+      color: var(--blue-strong);
+      font: 700 12px var(--mono);
+    }
+    .annotation p { margin: 0; font-size: 14.3px; color: var(--sub); line-height: 1.68; }
+
+    /* Summary takeaway */
+    .takeaway {
+      margin-top: 18px;
+      padding: 16px 20px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--teal);
+      border-radius: 10px;
+      background: var(--teal-soft);
+      font-size: 14.2px;
+      line-height: 1.72;
+    }
+    .takeaway strong { color: #094f43; }
+    .takeaway p { margin: 0; }
+    .takeaway p + p { margin-top: 8px; }
+
+    .foot {
+      margin-top: 22px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 980px) {
+      .intro { grid-template-columns: 1fr; }
+      .ribbon { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .stage { grid-template-columns: 1fr; }
+      .steps-col { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+    @media (max-width: 640px) {
+      .wrap { padding: 16px 12px 44px; }
+      .ribbon, .fate-grid, .elf-slots { grid-template-columns: 1fr; }
+      #progress { margin-left: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .step-token.moving, .elf-slot, .rib-node { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand-group">
+        <a class="nav-pill" href="index.html">← 文档索引</a>
+        <a class="nav-pill" href="android-dlopen-linker.html">← 回到《dlopen 链接原理》</a>
+        <h1>ELF 是怎么诞生的？<code>.c</code> → <code>.o</code> → <code>.so</code> 交互动画</h1>
+      </div>
+      <span style="font:700 12px var(--mono);color:var(--muted);">ARM64 Android · clang + lld</span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- Intro with concrete 2-file C example -->
+    <section class="intro">
+      <div>
+        <span class="intro-kicker">BIRTH OF AN ELF · 8 步全景动画</span>
+        <h2>亲眼看两份 <code>.c</code> 源码怎么变成 Android <code>.so</code>（ELF）</h2>
+        <p>把复杂的编译链接拆成最直观的两幕：<strong>第一幕（1–4 步）</strong>看 <code>foo.c</code> 如何被翻译成留满“地址空坑”的 <code>foo.o</code>（<code>ET_REL</code>）；<strong>第二幕（5–8 步）</strong>看链接器 <code>lld</code> 如何合并 <code>foo.o + bar.o</code>——把<strong>内部调用 <code>bar_helper</code> 当场填死</strong>，把<strong>外部调用 <code>__android_log_print</code> 甩进 <code>.got/.plt/.rela.plt</code> 留给 <code>dlopen</code></strong>，最终按权限打包 <code>PT_LOAD</code> 产出完整的 <code>libdemo.so</code>（<code>ET_DYN</code>）！</p>
+      </div>
+      <div class="src-preview">
+        <div class="src-preview-head">
+          <span>本动画示例源码（foo.c + bar.c）</span>
+          <span>含 1 次内部调用 + 1 次外部库调用</span>
+        </div>
+        <pre><span class="cc">// foo.c</span>
+<span class="ck">int</span> g_base = 10;                  <span class="cc">// → .data</span>
+<span class="ck">int</span> g_count;                      <span class="cc">// → .bss (磁盘0字节)</span>
+<span class="ck">int</span> demo_add(<span class="ck">int</span> x) {
+    <span class="ck">int</span> t = <span class="cs">bar_helper</span>(x);        <span class="cc">// ① 同工程 bar.c (内部)</span>
+    <span class="cw">__android_log_print</span>(3, <span class="cs">"Demo"</span>, <span class="cs">"%d"</span>, t); <span class="cc">// ② liblog.so (外部)</span>
+    <span class="ck">return</span> t + g_base;
+}
+<span class="cc">// bar.c</span>
+<span class="ck">int</span> <span class="cs">bar_helper</span>(<span class="ck">int</span> x) { <span class="ck">return</span> x * 2; }</pre>
+      </div>
+    </section>
+
+    <!-- 5-stage output evolution ribbon -->
+    <div class="ribbon" aria-label="产物形态演进">
+      <div class="rib-node" id="rib-0"><span class="r-phase">STEP 1</span><b><code>foo.i</code></b><span>预处理纯 C 文本</span></div>
+      <div class="rib-node" id="rib-1"><span class="r-phase">STEP 2</span><b><code>foo.s</code></b><span>ARM64 汇编文本</span></div>
+      <div class="rib-node" id="rib-2"><span class="r-phase">STEP 3–4</span><b><code>foo.o</code> + <code>bar.o</code></b><span>ELF (<code>ET_REL</code> · 无 Phdr)</span></div>
+      <div class="rib-node" id="rib-3"><span class="r-phase">STEP 5–7</span><b>合并 &amp; 决议 &amp; 造表</b><span>内填死 · 外甩 GOT/PLT</span></div>
+      <div class="rib-node" id="rib-4"><span class="r-phase">STEP 8</span><b><code>libdemo.so</code></b><span>完整 ELF (<code>ET_DYN</code>)</span></div>
+    </div>
+
+    <!-- Main Interactive Board -->
+    <section class="board" aria-label="ELF 生成 8 步交互动画">
+      <div class="toolbar">
+        <button type="button" id="btn-play">播放</button>
+        <button type="button" id="btn-prev">上一步</button>
+        <button type="button" id="btn-next">下一步</button>
+        <button type="button" id="btn-reset">重置</button>
+        <div class="phase-group" role="group" aria-label="阶段跳转">
+          <button type="button" data-jump="0" class="is-phase">第一幕：.c → .o (1–4)</button>
+          <button type="button" data-jump="4">第二幕：.o → .so (5–8)</button>
+        </div>
+        <output id="progress" aria-live="polite">第 1 / 8 步</output>
+      </div>
+
+      <div class="stage">
+        <!-- Left step list -->
+        <div class="steps-col">
+          <h3 class="col-label">构建流水线（点击任意一步直达）</h3>
+          <ol class="step-list" id="step-list">
+            <li class="phase-divider">第一幕 · 编译阶段：.c → .o（clang -fPIC -c）</li>
+            <li><button type="button" class="step-btn" aria-current="step"><b>1. 预处理：展开头文件与宏</b><small>foo.c → foo.i（纯 C 文本）</small></button></li>
+            <li><button type="button" class="step-btn"><b>2. 编译：C 翻译为 ARM64 汇编</b><small>foo.i → foo.s（bl 后面仍是函数名）</small></button></li>
+            <li><button type="button" class="step-btn"><b>3. 汇编：变机器码并按类分 Section</b><small>.text / .rodata / .data / .bss（空坑填 0）</small></button></li>
+            <li><button type="button" class="step-btn"><b>4. 产出 <code>foo.o</code>（ELF <code>ET_REL</code>）</b><small>附上 .symtab 与 .rela.text 未完清单</small></button></li>
+
+            <li class="phase-divider p2">第二幕 · 链接阶段：.o → .so（lld -shared -llog）</li>
+            <li><button type="button" class="step-btn p2"><b>5. 合并所有 <code>.o</code> 的同类 Section</b><small>foo.o + bar.o → 合并总 .text / .rodata / .data</small></button></li>
+            <li><button type="button" class="step-btn p2"><b>6. 符号决议：内填死，外甩 GOT/PLT！</b><small>bar_helper 填死；log 建 .plt + .got + .rela.plt</small></button></li>
+            <li><button type="button" class="step-btn p2"><b>7. 生成动态链接“运行期说明书”</b><small>.dynamic (DT_NEEDED) / .dynsym / .dynstr</small></button></li>
+            <li><button type="button" class="step-btn p2"><b>8. 按权限打包 <code>PT_LOAD</code> → <code>libdemo.so</code></b><small>写 Ehdr + Phdr[] + 末尾 Shdr[]（ET_DYN）</small></button></li>
+
+            <li class="step-token" id="step-token" aria-hidden="true" hidden></li>
+          </ol>
+        </div>
+
+        <!-- Right live visualization -->
+        <div class="visual-col">
+          <!-- Panel 1: Live file snapshot -->
+          <div class="viz-panel" id="panel-artifact">
+            <div class="viz-panel-head">
+              <span id="art-title">当前产物快照</span>
+              <span class="viz-badge" id="art-badge">文本阶段</span>
+            </div>
+            <div class="viz-panel-body">
+              <pre class="artifact-pre" id="art-pre"></pre>
+            </div>
+          </div>
+
+          <!-- Panel 2: Two calls fate comparison -->
+          <div class="viz-panel" id="panel-fate">
+            <div class="viz-panel-head">
+              <span>两条函数调用的命运对照（理解静态链接 vs 动态链接的关键！）</span>
+              <span class="viz-badge" id="fate-badge">观察中</span>
+            </div>
+            <div class="viz-panel-body">
+              <div class="fate-grid">
+                <div class="fate-card" id="fate-bar">
+                  <div class="fate-head">
+                    <b>① bar_helper(x)</b>
+                    <span class="fate-tag" id="fate-bar-tag">源码</span>
+                  </div>
+                  <p id="fate-bar-desc"></p>
+                </div>
+                <div class="fate-card" id="fate-log">
+                  <div class="fate-head">
+                    <b>② __android_log_print()</b>
+                    <span class="fate-tag" id="fate-log-tag">源码</span>
+                  </div>
+                  <p id="fate-log-desc"></p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Panel 3: ELF structure slots lighting up -->
+          <div class="viz-panel" id="panel-elf">
+            <div class="viz-panel-head">
+              <span>ELF 零件拼装台（亮起 = 已生成进产物）</span>
+              <span class="viz-badge" id="elf-badge">尚未形成 ELF</span>
+            </div>
+            <div class="viz-panel-body">
+              <div class="elf-slots">
+                <div class="elf-slot" id="slot-ehdr"><b>ELF Header (Ehdr)</b><span>封面：ET_REL → ET_DYN</span></div>
+                <div class="elf-slot" id="slot-phdr"><b>Program Headers (Phdr)</b><span>PT_LOAD / PT_DYNAMIC / RELRO</span></div>
+                <div class="elf-slot" id="slot-code"><b>.text / .rodata / .data / .bss</b><span>机器码、常量与全局变量</span></div>
+                <div class="elf-slot" id="slot-rel"><b>.symtab &amp; .rela.text</b><span>.o 里的临时符号与空坑表</span></div>
+                <div class="elf-slot" id="slot-got"><b>.plt / .got / .rela.plt</b><span>给外部库留的跳板与填空槽</span></div>
+                <div class="elf-slot" id="slot-dyn"><b>.dynamic / .dynsym / .dynstr</b><span>DT_NEEDED 与导出/导入总表</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom explanation -->
+      <div class="annotation" aria-live="polite" aria-atomic="true">
+        <div class="ann-top">
+          <h3 id="ann-title"></h3>
+          <span class="ann-cmd" id="ann-cmd"></span>
+        </div>
+        <p id="ann-text"></p>
+      </div>
+    </section>
+
+    <section class="takeaway">
+      <p><strong>一句话看懂整部动画：</strong></p>
+      <p>① <strong><code>.c → .o</code>（编译器 + 汇编器）</strong>是“各扫门前雪”——每个 <code>.c</code> 单独翻译成 <code>ET_REL</code> 格式的 <code>.o</code>，不认识别的文件里的函数，所有外部调用先在机器码里填 <code>0</code> 占坑，记进 <code>.rela.text</code>；此时还没有 <code>Program Header</code>，不能直接加载运行。</p>
+      <p>② <strong><code>.o → .so</code>（链接器 <code>lld -shared</code>）</strong>是“总装出厂”——把所有 <code>.o</code> 的同类节合并，<strong>同工程内部调用（<code>bar_helper</code>）当场算出偏移填死</strong>；<strong>跨库外部调用（<code>__android_log_print</code>）则造出 <code>.plt/.got/.rela.plt</code> + <code>.dynamic (DT_NEEDED)</code> 留给运行期 <code>dlopen</code> 填空</strong>；最后按 R / R-X / RW 权限打成 <code>PT_LOAD</code> 写进 Program Header，一个完整的 <code>ET_DYN</code> 动态库 ELF 就诞生了！</p>
+    </section>
+
+    <footer class="foot">
+      <span><a href="android-dlopen-linker.html">下一步：看 <code>dlopen()</code> 如何把刚诞生的 <code>libdemo.so</code> 加载进内存 →</a></span>
+      <span><a href="index.html">返回文档总索引</a> · Android Security Notes</span>
+    </footer>
+  </main>
+
+  <script>
+    const frames = [
+      {
+        phase: 1,
+        rib: 0,
+        cmd: 'clang -E foo.c -o foo.i',
+        title: '第 1 步 · 预处理：把 #include 和宏展开成纯 C 文本',
+        text: '预处理器只做纯文本替换：把 #include <android/log.h> 里的函数声明原样拷贝进来，把宏替换掉、把注释删掉，生成 foo.i。此时完全没有机器码，也还没有任何 ELF 结构。',
+        artTitle: 'foo.i（预处理后的纯 C 文本）',
+        artBadge: '纯文本',
+        artCode:
+`// 从 <android/log.h> 展开进来的外部声明：
+extern int __android_log_print(int prio, const char *tag, const char *fmt, ...);
+extern int bar_helper(int x);
+
+int g_base = 10;
+int g_count;
+int demo_add(int x) {
+    int t = bar_helper(x);
+    __android_log_print(3, "Demo", "%d", t);
+    return t + g_base;
+}`,
+        fateBadge: '纯 C 源码',
+        bar: { cls: '', tag: '外部声明', desc: '编译器只看到一句 extern int bar_helper(int)，不知道它的实现在哪。' },
+        log: { cls: '', tag: '外部声明', desc: '编译器只看到头文件展开的声明，同样不知道它来自 liblog.so。' },
+        elfBadge: '尚未形成 ELF',
+        slots: [],
+        justSlots: [],
+        panelLive: 'panel-artifact'
+      },
+      {
+        phase: 1,
+        rib: 1,
+        cmd: 'clang -fPIC -S foo.i -o foo.s',
+        title: '第 2 步 · 编译：C 代码翻译成 ARM64 汇编（指令里仍是符号名）',
+        text: '编译器做词法/语法分析与优化，输出 ARM64 汇编 foo.s。注意因为加了 -fPIC，访问全局变量 g_base 不会写死绝对地址，而是生成经由 GOT 间接寻址的汇编；而两条函数调用目前还只是符号名（bl bar_helper、bl __android_log_print）。',
+        artTitle: 'foo.s（ARM64 汇编文本，含节标记）',
+        artBadge: 'ARM64 汇编',
+        artCode:
+`.section .text
+demo_add:
+    stp  x29, x30, [sp, #-32]!
+    bl   bar_helper              // ← 仍是符号名，还不知道地址
+    ...
+    bl   __android_log_print     // ← 仍是符号名，也不知道来自哪个 .so
+    adrp x8, :got:g_base         // ← -fPIC：准备从 GOT 取 g_base 地址
+    ldr  x8, [x8, :got_lo12:g_base]
+    ret
+
+.section .data
+g_base: .word 10                 // 已初始化全局变量`,
+        fateBadge: '汇编符号',
+        bar: { cls: '', tag: '汇编 bl 符号', desc: '翻译成 <code>bl bar_helper</code>，具体跳转距离目前未知。' },
+        log: { cls: '', tag: '汇编 bl 符号', desc: '翻译成 <code>bl __android_log_print</code>，具体地址同样未知。' },
+        elfBadge: '尚未形成 ELF',
+        slots: [],
+        justSlots: [],
+        panelLive: 'panel-artifact'
+      },
+      {
+        phase: 1,
+        rib: 2,
+        cmd: 'clang -fPIC -c foo.s -o foo.o  (汇编器)',
+        title: '第 3 步 · 汇编：翻成二进制机器码、按属性装进 Section，未知地址先填 0 占坑！',
+        text: '汇编器把每条 ARM64 汇编翻成 4 字节机器码，并把代码、常量、数据分别装进 .text、.rodata、.data、.bss。遇到还不知道地址的 bl 指令，汇编器只能先把跳转偏移填成 0（空白坑位）！',
+        artTitle: 'foo.o 内部刚分好的 Section（机器码里留着 0 坑位）',
+        artBadge: '二进制分节',
+        artCode:
+`[.text]   0x00: fd 7b be a9   stp x29, x30, [sp, #-32]!
+          0x14: 00 00 00 94   bl  0x0   ← ⚠ 坑位 A (bar_helper 暂填 0)
+          0x28: 00 00 00 94   bl  0x0   ← ⚠ 坑位 B (__android_log_print 暂填 0)
+
+[.rodata] 0x00: "Demo\\0%d\\0"
+[.data]   0x00: 0a 00 00 00   (g_base = 10)
+[.bss]    仅记录 size = 4B (g_count)，磁盘文件里占 0 字节！`,
+        fateBadge: '机器码填 0 占坑',
+        bar: { cls: 'hole', tag: '⚠ 暂填 0 占坑', desc: '机器码位于 <code>.text + 0x14</code>，跳转偏移暂时是 <code>0</code>。' },
+        log: { cls: 'hole', tag: '⚠ 暂填 0 占坑', desc: '机器码位于 <code>.text + 0x28</code>，跳转偏移暂时是 <code>0</code>。' },
+        elfBadge: '正在组装 .o',
+        slots: ['slot-code'],
+        justSlots: ['slot-code'],
+        panelLive: 'panel-fate'
+      },
+      {
+        phase: 1,
+        rib: 2,
+        cmd: '产出：foo.o 与 bar.o（ELF 类型 = ET_REL）',
+        title: '第 4 步 · 生成 foo.o（ET_REL）：附上“符号表”和“空坑清单”，第一幕完成！',
+        text: '为了不让刚才填的 0 坑位被忘掉，汇编器在 foo.o 里附上 .symtab（记录自己导出了 demo_add、缺哪两个 UND 符号）和 .rela.text（记清哪几个偏移需要后续填空），再加上 ELF Header（ET_REL）和 Section Header。注意：.o 没有 Program Header，不能直接运行！',
+        artTitle: 'foo.o（ET_REL 可重定位 ELF）里留下的未完清单',
+        artBadge: 'ELF · ET_REL',
+        artCode:
+`ELF Header: type = ET_REL (1), e_phnum = 0 (没有 Program Header!)
+
+[.symtab 符号表]
+  demo_add             DEFINED (.text + 0x00)   ← 本文件提供
+  bar_helper           UND (未定义!)            ← 缺！待链接器找
+  __android_log_print  UND (未定义!)            ← 缺！待链接器找
+
+[.rela.text 空坑清单]
+  offset 0x14 → R_AARCH64_CALL26 (bar_helper)
+  offset 0x28 → R_AARCH64_CALL26 (__android_log_print)`,
+        fateBadge: '双双记入 .rela.text',
+        bar: { cls: 'hole', tag: 'UND + .rela.text', desc: '在 <code>foo.o</code> 里还是未定义（它其实藏在隔壁 <code>bar.o</code> 里！）。' },
+        log: { cls: 'hole', tag: 'UND + .rela.text', desc: '在 <code>foo.o</code> 里也是未定义（它其实在 Android 系统 <code>liblog.so</code> 里）。' },
+        elfBadge: '已产出 ET_REL (.o)',
+        slots: ['slot-ehdr', 'slot-code', 'slot-rel'],
+        justSlots: ['slot-ehdr', 'slot-rel'],
+        panelLive: 'panel-elf'
+      },
+      {
+        phase: 2,
+        rib: 3,
+        cmd: 'lld -shared foo.o bar.o -llog -o libdemo.so（步骤 A）',
+        title: '第 5 步 · 链接器 lld 登场：把 foo.o 和 bar.o 的同类 Section 合并在一起！',
+        text: '现在进入第二幕（.o → .so）。链接器 lld 同时吃进 foo.o 和 bar.o，把它们同类型的 Section 拼接成一整块：foo.o 的 .text 后面紧挨着 bar.o 的 .text，于是 demo_add 和 bar_helper 终于住进了同一个文件里，相对距离彻底确定！',
+        artTitle: '合并后的统一节布局（bar_helper 已进入总 .text）',
+        artBadge: 'Section 合并',
+        artCode:
+`[合并后的总 .text]
+  0x1000: demo_add()    ← 来自 foo.o (.text)
+            0x1014: bl  0x0  (待填 bar_helper)
+            0x1028: bl  0x0  (待填 __android_log_print)
+  0x1040: bar_helper()  ← 来自 bar.o (.text)！就在下方 +0x2c 处！
+
+[合并后的总 .rodata]  "Demo\\0%d\\0"
+[合并后的总 .data]    g_base = 10
+[合并后的总 .bss]     g_count (size = 4B)`,
+        fateBadge: 'bar_helper 已同处一室',
+        bar: { cls: 'resolved', tag: '🎯 已在 bar.o 找到', desc: '<code>bar_helper</code> 就在合并后 <code>.text</code> 的 <code>0x1040</code>，离调用点只差 <code>+0x2c</code>！' },
+        log: { cls: 'hole', tag: '所有 .o 均无定义', desc: '翻遍所有 <code>.o</code> 都没找到，但参数 <code>-llog</code> 指向的 <code>liblog.so</code> 导出表里有它。' },
+        elfBadge: '合并 .o 中',
+        slots: ['slot-ehdr', 'slot-code', 'slot-rel'],
+        justSlots: ['slot-code'],
+        panelLive: 'panel-artifact'
+      },
+      {
+        phase: 2,
+        rib: 3,
+        cmd: '符号决议 + 静态重定位 vs 构造 GOT / PLT',
+        title: '第 6 步 · 核心分水岭：内部调用当场填死，外部调用甩进 .plt / .got / .rela.plt！',
+        text: '链接器处理两条调用时分道扬镳：① bar_helper 是自家人，直接把 0x1014 处的 bl 指令改成相对跳转 +0x2c，彻底解决（不留给 dlopen）！② __android_log_print 在外部 liblog.so 里，运行期因 ASLR 地址未知，链接器给它造一段 .plt 跳板 + 一个空 .got 槽 + 一条 .rela.plt 记录，留给将来 dlopen 填空！',
+        artTitle: '两条指令的最终落定（静态链接已收尾 vs 推迟到运行期）',
+        artBadge: '核心分水岭',
+        artCode:
+`[总 .text]
+  0x1014: bl  +0x2c (bar_helper)             ← ✅ 静态填死！不再需要 dlopen
+  0x1028: bl  __android_log_print@plt        ← ⏳ 改跳到本库的 .plt 桩代码
+
+[.plt 跳转桩 (只读可执行)]
+  __android_log_print@plt:
+      ldr x16, [.got 槽 0x3088]              ← 去数据段 .got 读真实地址
+      br  x16                                ← 跳过去执行！
+
+[.got 数据槽 (初始为空)]   0x3088: 0x0000_0000_0000_0000
+[.rela.plt 填空清单]       offset=0x3088, type=R_AARCH64_JUMP_SLOT, sym="__android_log_print"`,
+        fateBadge: '内部填死 · 外部甩给 dlopen',
+        bar: { cls: 'resolved', tag: '✅ 链接期已填死', desc: '直接改写为相对跳转 <code>bl +0x2c</code>，运行期 <code>dlopen</code> 完全不用管它！' },
+        log: { cls: 'deferred', tag: '⏳ 推迟给 dlopen', desc: '改跳 <code>.plt</code> 查 <code>.got[0x3088]</code>，并在 <code>.rela.plt</code> 留下 <code>JUMP_SLOT</code> 填空单。' },
+        elfBadge: '已生成 GOT / PLT',
+        slots: ['slot-ehdr', 'slot-code', 'slot-got'],
+        justSlots: ['slot-got'],
+        panelLive: 'panel-fate'
+      },
+      {
+        phase: 2,
+        rib: 3,
+        cmd: '生成 .dynamic / .dynsym / .dynstr / .init_array',
+        title: '第 7 步 · 写好“运行期说明书”：生成 .dynamic、.dynsym 与 .dynstr',
+        text: '为了让 Android 的 linker64 / dlopen 运行时能看懂这个 .so，lld 自动生成动态链接专用表：在 .dynamic 里记下 DT_NEEDED = "liblog.so" 以及所有表的偏移；在 .dynsym + .dynstr 里列出本库对外导出的 demo_add 和向外部借用的 __android_log_print。',
+        artTitle: '专门写给 Android dlopen 看的动态链接总表',
+        artBadge: '运行期说明书',
+        artCode:
+`[.dynamic (Key-Value 总索引)]
+  DT_NEEDED     → .dynstr["liblog.so"]      // 告诉 dlopen：先加载 liblog.so
+  DT_SYMTAB     → .dynsym 偏移
+  DT_STRTAB     → .dynstr 偏移
+  DT_JMPREL     → .rela.plt 偏移            // 告诉 dlopen：照这张表填 .got
+  DT_INIT_ARRAY → .init_array 偏移          // 告诉 dlopen：链接完跑构造函数
+
+[.dynsym 动态符号表]
+  EXPORT: demo_add             (供别人 dlsym 查找)
+  IMPORT: __android_log_print  (UND，等 dlopen 去 liblog.so 查真实地址)`,
+        fateBadge: '已登记至动态表',
+        bar: { cls: 'resolved', tag: '✅ 彻底消化完毕', desc: '已在内部完全链接完成，无需出现在外部重定位表里。' },
+        log: { cls: 'deferred', tag: '已写入 DT_NEEDED + .dynsym', desc: '<code>DT_NEEDED</code> 记下 <code>liblog.so</code>，<code>.dynsym</code> 记下 <code>UND</code>，静待 <code>dlopen</code>！' },
+        elfBadge: '动态表已就绪',
+        slots: ['slot-ehdr', 'slot-code', 'slot-got', 'slot-dyn'],
+        justSlots: ['slot-dyn'],
+        panelLive: 'panel-elf'
+      },
+      {
+        phase: 2,
+        rib: 4,
+        cmd: '输出最终产物：libdemo.so（ELF 类型 = ET_DYN）',
+        title: '第 8 步 · 按权限打包 PT_LOAD 段，写出 Program Header → libdemo.so 诞生！',
+        text: '最后一步，lld 把所有相同内存权限的 Section 打包成 4 个 PT_LOAD 段（R-- / R-X / RW-→RELRO / RW-），把它们的磁盘偏移、虚拟偏移、权限写进 Program Header Table（Elf64_Phdr[]），把 ELF Header 类型改为 ET_DYN，并在文件末尾附上给 IDA 看的 Section Header。一个完整的 Android .so（ELF）正式出厂！',
+        artTitle: '出厂的 libdemo.so（ET_DYN · 可被 dlopen 直接加载）',
+        artBadge: '🎉 完整 ELF .so',
+        artCode:
+`ELF Header (64B):  \\x7fELF | ARM64 | type = ET_DYN (3) | e_phnum = 8
+
+Program Header Table (给 dlopen 看的施工单):
+  PT_LOAD #0  [R--]  Ehdr + Phdr[] + .dynsym + .dynstr + .rela.* + .rodata
+  PT_LOAD #1  [R-X]  .plt + .text  (内含已合并的 demo_add 与 bar_helper)
+  PT_LOAD #2  [RW-]  .init_array + .dynamic + .got  (配 PT_GNU_RELRO 填完锁 R--)
+  PT_LOAD #3  [RW-]  .data (filesz) + .bss (p_memsz > p_filesz, 磁盘0字节)
+  PT_DYNAMIC  ─────▶ 指向 .dynamic
+  PT_GNU_RELRO ────▶ 指向 PT_LOAD #2
+
+文件末尾: Section Header Table (仅给 readelf/IDA 看，dlopen 不加载进内存)`,
+        fateBadge: '出厂完毕，等待 dlopen',
+        bar: { cls: 'resolved', tag: '✅ 已在 PT_LOAD #1 (R-X)', desc: '与 <code>demo_add</code> 一起稳稳躺在代码段里，运行期直接相对跳转零开销。' },
+        log: { cls: 'deferred', tag: '⏳ 等待 dlopen 填 GOT', desc: '一切线索（<code>DT_NEEDED</code>、<code>.dynsym</code>、<code>.rela.plt</code>、<code>.got</code>）都已打包就位！' },
+        elfBadge: '🎉 完整 ET_DYN (.so)',
+        slots: ['slot-ehdr', 'slot-phdr', 'slot-code', 'slot-got', 'slot-dyn'],
+        justSlots: ['slot-phdr', 'slot-ehdr'],
+        panelLive: 'panel-elf'
+      }
+    ];
+
+    const byId = id => document.getElementById(id);
+    const stepList = byId('step-list');
+    const stepBtns = [...stepList.querySelectorAll('.step-btn')];
+    const token = byId('step-token');
+    const btnPlay = byId('btn-play');
+    const btnPrev = byId('btn-prev');
+    const btnNext = byId('btn-next');
+    const btnReset = byId('btn-reset');
+    const phaseBtns = [...document.querySelectorAll('.phase-group button')];
+    const ribNodes = [0,1,2,3,4].map(i => byId('rib-' + i));
+    const slotIds = ['slot-ehdr', 'slot-phdr', 'slot-code', 'slot-rel', 'slot-got', 'slot-dyn'];
+    const slotColors = {
+      'slot-ehdr': '',
+      'slot-phdr': 'teal',
+      'slot-code': '',
+      'slot-rel': 'amber',
+      'slot-got': 'amber',
+      'slot-dyn': 'violet'
+    };
+
+    let step = 0;
+    let timer = null;
+
+    function positionToken(animate) {
+      const outer = stepList.getBoundingClientRect();
+      const target = stepBtns[step].getBoundingClientRect();
+      token.classList.toggle('moving', animate);
+      token.classList.toggle('p2', frames[step].phase === 2);
+      token.style.transform = `translateY(${target.top - outer.top + (target.height - 12) / 2}px)`;
+      token.hidden = false;
+    }
+
+    function render(animate = true) {
+      const f = frames[step];
+
+      stepBtns.forEach((btn, i) => {
+        if (i === step) btn.setAttribute('aria-current', 'step');
+        else btn.removeAttribute('aria-current');
+      });
+
+      ribNodes.forEach((node, i) => {
+        node.classList.toggle('active', i === f.rib);
+        node.classList.toggle('done', i < f.rib);
+      });
+
+      ['panel-artifact', 'panel-fate', 'panel-elf'].forEach(id => {
+        const el = byId(id);
+        el.classList.remove('live', 'live-teal');
+        if (id === f.panelLive) el.classList.add(f.phase === 2 ? 'live-teal' : 'live');
+      });
+
+      byId('art-title').textContent = f.artTitle;
+      byId('art-badge').textContent = f.artBadge;
+      byId('art-pre').textContent = f.artCode;
+
+      byId('fate-badge').textContent = f.fateBadge;
+      const barCard = byId('fate-bar');
+      barCard.className = 'fate-card' + (f.bar.cls ? ' ' + f.bar.cls : '');
+      byId('fate-bar-tag').textContent = f.bar.tag;
+      byId('fate-bar-desc').innerHTML = f.bar.desc;
+
+      const logCard = byId('fate-log');
+      logCard.className = 'fate-card' + (f.log.cls ? ' ' + f.log.cls : '');
+      byId('fate-log-tag').textContent = f.log.tag;
+      byId('fate-log-desc').innerHTML = f.log.desc;
+
+      byId('elf-badge').textContent = f.elfBadge;
+      slotIds.forEach(id => {
+        const el = byId(id);
+        const on = f.slots.includes(id);
+        const just = f.justSlots.includes(id);
+        const color = slotColors[id];
+        el.className = 'elf-slot' + (on ? ' on' + (color ? ' ' + color : '') : '') + (just ? ' just' : '');
+      });
+
+      byId('ann-title').textContent = f.title;
+      byId('ann-cmd').textContent = f.cmd;
+      byId('ann-text').textContent = f.text;
+      byId('progress').textContent = `第 ${step + 1} / ${frames.length} 步`;
+
+      btnPrev.disabled = step === 0;
+      btnNext.disabled = step === frames.length - 1;
+      btnPlay.textContent = timer !== null ? '暂停' : step === frames.length - 1 ? '重播' : '播放';
+
+      phaseBtns[0].classList.toggle('is-phase', f.phase === 1);
+      phaseBtns[1].classList.toggle('is-phase', f.phase === 2);
+      phaseBtns[1].classList.toggle('p2', f.phase === 2);
+
+      positionToken(animate);
+    }
+
+    function stop() {
+      if (timer !== null) { clearInterval(timer); timer = null; }
+    }
+    function seek(next) {
+      stop();
+      step = Math.max(0, Math.min(frames.length - 1, next));
+      render(true);
+    }
+
+    btnPlay.addEventListener('click', () => {
+      if (timer !== null) { stop(); render(false); return; }
+      if (step === frames.length - 1) step = 0;
+      timer = setInterval(() => {
+        step++;
+        if (step === frames.length - 1) stop();
+        render(true);
+      }, 3000);
+      render(true);
+    });
+    btnPrev.addEventListener('click', () => seek(step - 1));
+    btnNext.addEventListener('click', () => seek(step + 1));
+    btnReset.addEventListener('click', () => seek(0));
+    stepBtns.forEach((btn, i) => btn.addEventListener('click', () => seek(i)));
+    phaseBtns.forEach(btn => btn.addEventListener('click', () => seek(Number(btn.dataset.jump))));
+
+    if ('ResizeObserver' in window) new ResizeObserver(() => positionToken(false)).observe(stepList);
+    else window.addEventListener('resize', () => positionToken(false));
+
+    render(false);
+  </script>
+</body>
+</html>
